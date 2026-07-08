@@ -1,0 +1,20 @@
+# Vivado / Xilinx temporary tool files
+*.log
+*.jou
+*.str
+*.os
+*.vlm
+*.pb
+*.mif
+*.dir/
+.Xil/
+vivado_pid*.str
+
+# Local User Settings & Workspace cache
+.analytics/
+Work/
+.antigravity/
+
+# Sandboxed Simulation Outputs
+vivado/cli_workspace/*
+!vivado/cli_workspace/.gitkeep
