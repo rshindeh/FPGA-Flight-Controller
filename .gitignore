@@ -6,9 +6,13 @@
 *.vlm
 *.pb
 *.mif
+*.wdb
+*.vcd
 *.dir/
+xsim.dir/
 .Xil/
 vivado_pid*.str
+dfx_runtime.txt
 
 # Local User Settings & Workspace cache
 .analytics/
@@ -16,5 +20,4 @@ Work/
 .antigravity/
 
 # Sandboxed Simulation Outputs
-vivado/cli_workspace/*
-!vivado/cli_workspace/.gitkeep
+vivado/

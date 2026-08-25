@@ -3,7 +3,8 @@
 module pid_calculator (
     input  logic               clk,
     input  logic               rst_n,
-    input  logic               enable, // Strobe high for 1 clock cycle to process a new sample
+    input  logic               enable,  // Strobe high for 1 clock cycle to process a new sample
+    input  logic               clear_i, // Strobe or hold high to clear the integral accumulator
     
     // Target and Actual Values (16-bit signed, Q8.8 fixed-point format)
     input  logic signed [15:0] target_val,
@@ -37,6 +38,11 @@ module pid_calculator (
         if (!rst_n) begin
             prev_error     <= 16'sd0;
             integral_error <= 32'sd0;
+        end else if (clear_i) begin
+            integral_error <= 32'sd0;
+            if (enable) begin
+                prev_error <= current_error;
+            end
         end else if (enable) begin
             prev_error <= current_error;
             

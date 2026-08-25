@@ -6,25 +6,32 @@ This document serves as the absolute reference design configuration for the auto
 ### Hardware Platform
 - **Target FPGA:** Digilent CMOD A7-35T (Xilinx Artix-7 XC7A35T-1CPG236C)
 - **Inertial Measurement Unit (IMU):** MPU-6050 Gyroscope/Accelerometer breakout board
+- **Electronic Speed Controllers (ESCs):** Standard 400 Hz PWM (1.0 ms to 2.0 ms active pulse width)
 
 ---
 
 ## 2. Clocking Architecture & Timing Constraints
-The master clocking framework must drive all internal logic and sample rates precisely based on a single input clock distribution network:
+The master clocking framework drives all internal logic and sample rates based on a single input clock distribution network:
 
-- **System Master Clock (clk):** 12 MHz oscillator input from the CMOD A7 board.
-- **I2C Serial Clock (SCL):** Fast-Mode 400 kHz SCL line generated via a hardwired division counter from the 12 MHz clock.
-- **Output PWM Frame Rate:** 400 Hz pulse-frequency square wave driving Electronic Speed Controllers (ESCs).
-- **RC Receiver Target Input:** Decoding nominal 50 Hz PWM control pulses (1 ms to 2 ms durations) from a standard RC receiver.
+- **System Master Clock (`clk`):** 12 MHz oscillator input from the CMOD A7 board.
+- **I2C Serial Clock (`scl`):** Fast-Mode 400 kHz SCL line generated via a hardwired division counter from the 12 MHz clock.
+- **Sensor Loop Rate:** 1 kHz periodic burst read loop.
+- **Output PWM Frame Rate:** 400 Hz pulse-frequency square wave driving ESCs (2.5 ms frame period = 30,000 ticks).
+- **RC Receiver Target Input:** Decoding nominal 50 Hz PWM control pulses (1.0 ms to 2.0 ms durations = 12,000 to 24,000 ticks) from a standard RC receiver.
 
 ---
 
-## 3. High-Level Dataflow Architecture
-1. **Sensor Ingestion:** The `i2c_master` module queries the MPU-6050 gyroscope registers at standard sampling loops to acquire raw angular velocity inputs.
-2. **Pilot Ingestion:** The `rc_receiver` module measures incoming pilot commands from the physical controller, synchronizes signals against metastability, and computes the desired setpoint target values.
-3. **Error Evaluation:** The `pid_calculator` compares pilot target values against current sensor feedback data to compute active correction vectors.
-4. **Mixing & Saturation:** The `motor_mixer` blends master throttle data with the PID correction factors, runs anti-wrap truncation checks, and routes the individual channels out.
-5. **Signal Drive:** The `pwm_generator` channels map raw binary parameters out to the ESC motor pins.
+## 3. High-Level Dataflow & Cascaded Control Architecture
+1. **Sensor Ingestion (`i2c_master.sv`):** Queries the MPU-6050 in 14-byte bursts starting at `0x3B` (`ACCEL_XOUT_H`) to acquire Accelerometer X/Y/Z, Temperature, and Gyroscope X/Y/Z readings at 1 kHz.
+2. **Pilot Ingestion & Synchronization (`rc_receiver.sv`):** Synchronizes raw incoming RC pulses through a 2-stage flip-flop chain for metastability immunity, decodes pulse widths with synchronous edge detection, and implements a 100 ms lost-signal watchdog.
+3. **Setpoint Mapping (`rc_mapper.sv`):** Centers sticks around 1.5 ms with a $\pm 100\text{ tick}$ deadband, generating target roll/pitch tilt angles ($\pm 30.0^\circ$) and target yaw rate ($\pm 100.0^\circ/\text{s}$).
+4. **Safety & Arming Management (`safety_mgr.sv`):** Evaluates stick sequences for arming (Throttle Min + Yaw Full Right for 1.0s) and disarming (Throttle Min + Yaw Full Left). Provides ground-idle PID integral clearing.
+5. **Attitude Estimation (`attitude_estimator.sv`):** 6-DOF Complementary Filter executing in 32-bit Q16.16 fixed-point math, fusing gyro integration with accelerometer gravity vectors to produce zero-drift `roll_angle` and `pitch_angle` outputs in Q8.8 format.
+6. **Cascaded Dual-Loop PID Control (`flight_core.sv`):**
+   - **Outer Angle P-Loop:** Compares target angle against estimated angle, producing demanded angular rates ($^\circ/\text{s}$).
+   - **Inner Rate PID-Loop:** Compares demanded rate against raw gyroscope rate, computing dynamic differential thrust corrections with anti-windup clamping.
+7. **Mixing & Saturation (`motor_mixer.sv`):** Blends collective throttle with Roll, Pitch, and Yaw PID corrections according to the Quad-X matrix, strictly clamping outputs to standard ESC bounds $[12000, 24000]\text{ ticks}$.
+8. **Signal Drive (`pwm_generator.sv`):** Generates 400 Hz ESC pulses with synchronous double-buffering at `counter == 0` to prevent mid-frame glitching.
 
 ---
 
@@ -34,20 +41,22 @@ The master clocking framework must drive all internal logic and sample rates pre
 - **Resolution:** 15-bit unsigned counter operating up to a terminal frame limit of `30,000` ticks (yielding exactly 400 Hz from a 12 MHz clock source).
 - **Safety Protocol:** Implements double-buffering via an internal shadow register (`duty_cycle_buf`). Input `duty_cycle` values are only loaded into the active comparator at the exact boundary where `counter == 0` to completely eliminate mid-frame frequency glitching.
 
-### B. I2C Controller State Machine (`rtl/i2c_master.sv`)
-- **Protocol Loop:** A hardwired finite state machine handling START, Device Address broadcast, Register Pointer configuration, Repeated START, Data Read (with ACK generation), and STOP protocols.
-- **Target Ingestion:** Autonomously streams 16-bit signed internal gyroscope output registers (Roll, Pitch, Yaw velocities) from the MPU-6050.
+### B. I2C Master (`rtl/i2c_master.sv`)
+- **Protocol Loop:** A hardwired finite state machine handling START, Device Address broadcast, Register Pointer configuration, Repeated START, 14-byte Data Read (with ACK/NACK generation), and STOP protocols.
+- **Target Ingestion:** Continuously streams 16-bit signed Accelerometer X/Y/Z, Temperature, and Gyroscope X/Y/Z registers starting at `0x3B`.
 
-### C. PID Calculator (`rtl/pid_calculator.sv`)
-- **Arithmetic Protocol:** 16-bit fixed-point signed arithmetic using a **Q8.8 representation** (8 bits for the integer part, 8 bits for the fractional component).
-- **Control Constraints:** Computes proportional, integral, and derivative corrections based on `Error = Target - Actual`. 
-- **Internal Sizing:** Intermediate multiplier steps must utilize full signed 32-bit arithmetic to prevent intermediate overflow before truncating back down to standard fixed-point constraints.
+### C. Attitude Estimator (`rtl/attitude_estimator.sv`)
+- **Arithmetic Precision:** 32-bit Q16.16 signed fixed-point accumulators to eliminate truncation drift.
+- **Output Format:** 16-bit signed Q8.8 fixed-point ($1.0^\circ = 256\text{ units}$).
 
-### D. Motor Mixer (`rtl/motor_mixer.sv`)
-- **Functional Isolation:** This block is functionally separate from signal decoding modules.
-- **Logic Matrix:** Blends core throttle thresholds with the Roll, Pitch, and Yaw error corrections calculated by the PID logic.
-- **Saturation Controls:** Enforces rigid lower-bound and upper-bound truncation limits. If mixed channel math exceeds `30,000` or drops below `0`, the value must saturate cleanly at the absolute limits to prevent catastrophic overflow bit wrapping.
+### D. PID Calculator (`rtl/pid_calculator.sv`)
+- **Arithmetic Protocol:** 16-bit fixed-point signed arithmetic using a **Q8.8 representation** (8 bits for integer, 8 bits for fractional component).
+- **Anti-Windup Protection:** Integral accumulator is clamped to 16-bit signed limits ($\pm 32767$), and zeroed upon landing/idle (`clear_i = 1`) to eliminate on-ground motor spool-up.
 
-### E. RC Receiver Decoder (`rtl/rc_receiver.sv`)
+### E. Motor Mixer (`rtl/motor_mixer.sv`)
+- **Logic Matrix:** Quad-X mixing matrix blending collective throttle with Roll, Pitch, and Yaw error corrections.
+- **Saturation Controls:** Enforces rigid lower-bound ($12,000\text{ ticks} = 1.0\text{ ms}$) and upper-bound ($24,000\text{ ticks} = 2.0\text{ ms}$) limits. Disarmed state rigidly locks all motor outputs to $12,000\text{ ticks}$.
+
+### F. RC Receiver Decoder (`rtl/rc_receiver.sv`)
 - **Synchronization:** Passes all raw incoming 50 Hz asynchronous pulse lines through a dedicated 2-stage flip-flop chain to completely eliminate metastability issues.
-- **Decoding:** Uses synchronous edge detection to log active pulse lengths, translating time widths (1 ms to 2 ms) into standardized 15-bit target tracking values.
+- **Decoding:** Uses synchronous edge detection to log active pulse lengths, translating time widths (1.0 ms to 2.0 ms) into standardized 15-bit target tracking values.

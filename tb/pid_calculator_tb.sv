@@ -6,6 +6,7 @@ module pid_calculator_tb();
     logic               clk;
     logic               rst_n;
     logic               enable;
+    logic               clear_i;
     
     logic signed [15:0] target_val;
     logic signed [15:0] actual_val;
@@ -20,6 +21,7 @@ module pid_calculator_tb();
         .clk(clk),
         .rst_n(rst_n),
         .enable(enable),
+        .clear_i(clear_i),
         .target_val(target_val),
         .actual_val(actual_val),
         .p_gain(p_gain),
@@ -53,6 +55,7 @@ module pid_calculator_tb();
         // Reset
         rst_n = 1'b0;
         enable = 1'b0;
+        clear_i = 1'b0;
         target_val = 16'sd0;
         actual_val = 16'sd0;
         p_gain = 16'sd0;
@@ -155,10 +158,20 @@ module pid_calculator_tb();
 
         $display("[TB] Output Correction: 0x%h (Expected clamped to 0x8000)", pid_correction);
         
-        if (pid_correction == 16'sh8000) begin
-            $display("[TB] PASS: Integral accumulator saturated cleanly at its negative minimum limit.");
+        // Test Case 4: Verify clear_i resets integral accumulator
+        $display("[TB] --- Test Case 4: Integral Reset via clear_i ---");
+        clear_i = 1'b1;
+        #10;
+        clear_i = 1'b0;
+        target_val = 16'sh0000;
+        actual_val = 16'sh0000;
+        trigger_update();
+        #10;
+        $display("[TB] Output Correction after clear_i: 0x%h (Expected 0x0000)", pid_correction);
+        if (pid_correction == 16'sh0000) begin
+            $display("[TB] PASS: clear_i successfully zeroed the integral accumulator.");
         end else begin
-            $display("[TB] FAIL: Negative Integral anti-windup failed. Output: %d", pid_correction);
+            $display("[TB] FAIL: clear_i did not zero integral accumulator.");
         end
 
         $display("[TB] PID Calculator Verification completed successfully.");

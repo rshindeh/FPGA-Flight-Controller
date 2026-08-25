@@ -1,19 +1,22 @@
 `timescale 1ns / 1ps
 
 module i2c_master (
-    input  logic        clk,     // 12 MHz System Clock
-    input  logic        rst_n,   // Active-Low Synchronized Reset
-    inout  wire         scl,     // I2C Serial Clock Line (Open-Drain)
-    inout  wire         sda,     // I2C Serial Data Line (Open-Drain)
-    output logic [15:0] gyro_x,  // Roll Rate (16-bit Signed Gyroscope Data)
-    output logic [15:0] gyro_y,  // Pitch Rate (16-bit Signed Gyroscope Data)
-    output logic [15:0] gyro_z,  // Yaw Rate (16-bit Signed Gyroscope Data)
-    output logic        valid,   // 1-Cycle Pulse: Outputs are stable and updated
-    output logic        error    // Asserted on Slave NACK / Communication Fault
+    input  logic        clk,      // 12 MHz System Clock
+    input  logic        rst_n,    // Active-Low Synchronized Reset
+    inout  wire         scl,      // I2C Serial Clock Line (Open-Drain)
+    inout  wire         sda,      // I2C Serial Data Line (Open-Drain)
+    output logic [15:0] accel_x,  // Accelerometer X (16-bit Signed)
+    output logic [15:0] accel_y,  // Accelerometer Y (16-bit Signed)
+    output logic [15:0] accel_z,  // Accelerometer Z (16-bit Signed)
+    output logic [15:0] gyro_x,   // Roll Rate (16-bit Signed Gyroscope Data)
+    output logic [15:0] gyro_y,   // Pitch Rate (16-bit Signed Gyroscope Data)
+    output logic [15:0] gyro_z,   // Yaw Rate (16-bit Signed Gyroscope Data)
+    output logic        valid,    // 1-Cycle Pulse: Outputs are stable and updated
+    output logic        error     // Asserted on Slave NACK / Communication Fault
 );
 
     // 1. High-Level Sequencer States
-    typedef enum logic [4:0] {
+    typedef enum logic [5:0] {
         SEQ_IDLE,
         SEQ_INIT_WAIT,
         SEQ_INIT_WAKE_START,
@@ -28,12 +31,20 @@ module i2c_master (
         SEQ_READ_REP_START,
         SEQ_READ_DEV_ADDR_R,
         
-        SEQ_READ_DATA_X_H,
-        SEQ_READ_DATA_X_L,
-        SEQ_READ_DATA_Y_H,
-        SEQ_READ_DATA_Y_L,
-        SEQ_READ_DATA_Z_H,
-        SEQ_READ_DATA_Z_L,
+        SEQ_READ_ACCEL_X_H,
+        SEQ_READ_ACCEL_X_L,
+        SEQ_READ_ACCEL_Y_H,
+        SEQ_READ_ACCEL_Y_L,
+        SEQ_READ_ACCEL_Z_H,
+        SEQ_READ_ACCEL_Z_L,
+        SEQ_READ_TEMP_H,
+        SEQ_READ_TEMP_L,
+        SEQ_READ_GYRO_X_H,
+        SEQ_READ_GYRO_X_L,
+        SEQ_READ_GYRO_Y_H,
+        SEQ_READ_GYRO_Y_L,
+        SEQ_READ_GYRO_Z_H,
+        SEQ_READ_GYRO_Z_L,
         SEQ_READ_STOP,
         SEQ_READ_DELAY,
         
@@ -70,9 +81,13 @@ module i2c_master (
     seq_state_t seq_after_wait_state;
     logic [19:0] delay_timer;
     logic [7:0]  tx_data;
-    logic [7:0]  reg_x_h, reg_x_l;
-    logic [7:0]  reg_y_h, reg_y_l;
-    logic [7:0]  reg_z_h, reg_z_l;
+    logic [7:0]  reg_ax_h, reg_ax_l;
+    logic [7:0]  reg_ay_h, reg_ay_l;
+    logic [7:0]  reg_az_h, reg_az_l;
+    logic [7:0]  reg_temp_h, reg_temp_l;
+    logic [7:0]  reg_gx_h, reg_gx_l;
+    logic [7:0]  reg_gy_h, reg_gy_l;
+    logic [7:0]  reg_gz_h, reg_gz_l;
 
     // --- Bit Controller Signals/Registers ---
     sub_cmd_t   sub_cmd;
@@ -301,12 +316,23 @@ module i2c_master (
             delay_timer          <= 20'd0;
             sub_cmd              <= SUB_CMD_NONE;
             tx_data              <= 8'd0;
-            reg_x_h              <= 8'd0;
-            reg_x_l              <= 8'd0;
-            reg_y_h              <= 8'd0;
-            reg_y_l              <= 8'd0;
-            reg_z_h              <= 8'd0;
-            reg_z_l              <= 8'd0;
+            reg_ax_h             <= 8'd0;
+            reg_ax_l             <= 8'd0;
+            reg_ay_h             <= 8'd0;
+            reg_ay_l             <= 8'd0;
+            reg_az_h             <= 8'd0;
+            reg_az_l             <= 8'd0;
+            reg_temp_h           <= 8'd0;
+            reg_temp_l           <= 8'd0;
+            reg_gx_h             <= 8'd0;
+            reg_gx_l             <= 8'd0;
+            reg_gy_h             <= 8'd0;
+            reg_gy_l             <= 8'd0;
+            reg_gz_h             <= 8'd0;
+            reg_gz_l             <= 8'd0;
+            accel_x              <= 16'd0;
+            accel_y              <= 16'd0;
+            accel_z              <= 16'd0;
             gyro_x               <= 16'd0;
             gyro_y               <= 16'd0;
             gyro_z               <= 16'd0;
@@ -367,7 +393,7 @@ module i2c_master (
                     state_reg            <= SEQ_WAIT_DONE;
                 end
 
-                // --- Periodic Gyroscope Read Loop ---
+                // --- Periodic Sensor Burst Read Loop (14 Bytes starting at 0x3B) ---
                 SEQ_READ_START: begin
                     sub_cmd        <= SUB_CMD_START;
                     seq_next_state <= SEQ_READ_DEV_ADDR_W;
@@ -383,7 +409,7 @@ module i2c_master (
 
                 SEQ_READ_REG_ADDR: begin
                     sub_cmd        <= SUB_CMD_WRITE;
-                    tx_data        <= 8'h43; // GYRO_XOUT_H register
+                    tx_data        <= 8'h3B; // ACCEL_XOUT_H register (burst read starting address)
                     seq_next_state <= SEQ_READ_REP_START;
                     state_reg      <= SEQ_WAIT_DONE;
                 end
@@ -397,42 +423,90 @@ module i2c_master (
                 SEQ_READ_DEV_ADDR_R: begin
                     sub_cmd        <= SUB_CMD_WRITE;
                     tx_data        <= 8'hD1; // MPU-6050 Device Address Read
-                    seq_next_state <= SEQ_READ_DATA_X_H;
+                    seq_next_state <= SEQ_READ_ACCEL_X_H;
                     state_reg      <= SEQ_WAIT_DONE;
                 end
 
-                SEQ_READ_DATA_X_H: begin
+                SEQ_READ_ACCEL_X_H: begin
                     sub_cmd        <= SUB_CMD_READ_ACK;
-                    seq_next_state <= SEQ_READ_DATA_X_L;
+                    seq_next_state <= SEQ_READ_ACCEL_X_L;
                     state_reg      <= SEQ_WAIT_DONE;
                 end
 
-                SEQ_READ_DATA_X_L: begin
+                SEQ_READ_ACCEL_X_L: begin
                     sub_cmd        <= SUB_CMD_READ_ACK;
-                    seq_next_state <= SEQ_READ_DATA_Y_H;
+                    seq_next_state <= SEQ_READ_ACCEL_Y_H;
                     state_reg      <= SEQ_WAIT_DONE;
                 end
 
-                SEQ_READ_DATA_Y_H: begin
+                SEQ_READ_ACCEL_Y_H: begin
                     sub_cmd        <= SUB_CMD_READ_ACK;
-                    seq_next_state <= SEQ_READ_DATA_Y_L;
+                    seq_next_state <= SEQ_READ_ACCEL_Y_L;
                     state_reg      <= SEQ_WAIT_DONE;
                 end
 
-                SEQ_READ_DATA_Y_L: begin
+                SEQ_READ_ACCEL_Y_L: begin
                     sub_cmd        <= SUB_CMD_READ_ACK;
-                    seq_next_state <= SEQ_READ_DATA_Z_H;
+                    seq_next_state <= SEQ_READ_ACCEL_Z_H;
                     state_reg      <= SEQ_WAIT_DONE;
                 end
 
-                SEQ_READ_DATA_Z_H: begin
+                SEQ_READ_ACCEL_Z_H: begin
                     sub_cmd        <= SUB_CMD_READ_ACK;
-                    seq_next_state <= SEQ_READ_DATA_Z_L;
+                    seq_next_state <= SEQ_READ_ACCEL_Z_L;
                     state_reg      <= SEQ_WAIT_DONE;
                 end
 
-                SEQ_READ_DATA_Z_L: begin
-                    sub_cmd        <= SUB_CMD_READ_NACK; // NACK last byte
+                SEQ_READ_ACCEL_Z_L: begin
+                    sub_cmd        <= SUB_CMD_READ_ACK;
+                    seq_next_state <= SEQ_READ_TEMP_H;
+                    state_reg      <= SEQ_WAIT_DONE;
+                end
+
+                SEQ_READ_TEMP_H: begin
+                    sub_cmd        <= SUB_CMD_READ_ACK;
+                    seq_next_state <= SEQ_READ_TEMP_L;
+                    state_reg      <= SEQ_WAIT_DONE;
+                end
+
+                SEQ_READ_TEMP_L: begin
+                    sub_cmd        <= SUB_CMD_READ_ACK;
+                    seq_next_state <= SEQ_READ_GYRO_X_H;
+                    state_reg      <= SEQ_WAIT_DONE;
+                end
+
+                SEQ_READ_GYRO_X_H: begin
+                    sub_cmd        <= SUB_CMD_READ_ACK;
+                    seq_next_state <= SEQ_READ_GYRO_X_L;
+                    state_reg      <= SEQ_WAIT_DONE;
+                end
+
+                SEQ_READ_GYRO_X_L: begin
+                    sub_cmd        <= SUB_CMD_READ_ACK;
+                    seq_next_state <= SEQ_READ_GYRO_Y_H;
+                    state_reg      <= SEQ_WAIT_DONE;
+                end
+
+                SEQ_READ_GYRO_Y_H: begin
+                    sub_cmd        <= SUB_CMD_READ_ACK;
+                    seq_next_state <= SEQ_READ_GYRO_Y_L;
+                    state_reg      <= SEQ_WAIT_DONE;
+                end
+
+                SEQ_READ_GYRO_Y_L: begin
+                    sub_cmd        <= SUB_CMD_READ_ACK;
+                    seq_next_state <= SEQ_READ_GYRO_Z_H;
+                    state_reg      <= SEQ_WAIT_DONE;
+                end
+
+                SEQ_READ_GYRO_Z_H: begin
+                    sub_cmd        <= SUB_CMD_READ_ACK;
+                    seq_next_state <= SEQ_READ_GYRO_Z_L;
+                    state_reg      <= SEQ_WAIT_DONE;
+                end
+
+                SEQ_READ_GYRO_Z_L: begin
+                    sub_cmd        <= SUB_CMD_READ_NACK; // NACK last byte (14th byte)
                     seq_next_state <= SEQ_READ_STOP;
                     state_reg      <= SEQ_WAIT_DONE;
                 end
@@ -455,21 +529,32 @@ module i2c_master (
                 SEQ_WAIT_DONE: begin
                     sub_cmd <= SUB_CMD_NONE; // Handshake clear cmd to avoid trigger loop
                     if (sub_done) begin
-                        // Latch intermediate registers when the corresponding byte finish reading
-                        if (seq_next_state == SEQ_READ_DATA_X_L) reg_x_h <= rx_data;
-                        else if (seq_next_state == SEQ_READ_DATA_Y_H) reg_x_l <= rx_data;
-                        else if (seq_next_state == SEQ_READ_DATA_Y_L) reg_y_h <= rx_data;
-                        else if (seq_next_state == SEQ_READ_DATA_Z_H) reg_y_l <= rx_data;
-                        else if (seq_next_state == SEQ_READ_DATA_Z_L) reg_z_h <= rx_data;
-                        else if (seq_next_state == SEQ_READ_STOP)     reg_z_l <= rx_data;
+                        // Latch intermediate registers when the corresponding byte finishes reading
+                        if (seq_next_state == SEQ_READ_ACCEL_X_L) reg_ax_h   <= rx_data;
+                        else if (seq_next_state == SEQ_READ_ACCEL_Y_H) reg_ax_l <= rx_data;
+                        else if (seq_next_state == SEQ_READ_ACCEL_Y_L) reg_ay_h <= rx_data;
+                        else if (seq_next_state == SEQ_READ_ACCEL_Z_H) reg_ay_l <= rx_data;
+                        else if (seq_next_state == SEQ_READ_ACCEL_Z_L) reg_az_h <= rx_data;
+                        else if (seq_next_state == SEQ_READ_TEMP_H)    reg_az_l <= rx_data;
+                        else if (seq_next_state == SEQ_READ_TEMP_L)    reg_temp_h <= rx_data;
+                        else if (seq_next_state == SEQ_READ_GYRO_X_H)  reg_temp_l <= rx_data;
+                        else if (seq_next_state == SEQ_READ_GYRO_X_L)  reg_gx_h <= rx_data;
+                        else if (seq_next_state == SEQ_READ_GYRO_Y_H)  reg_gx_l <= rx_data;
+                        else if (seq_next_state == SEQ_READ_GYRO_Y_L)  reg_gy_h <= rx_data;
+                        else if (seq_next_state == SEQ_READ_GYRO_Z_H)  reg_gy_l <= rx_data;
+                        else if (seq_next_state == SEQ_READ_GYRO_Z_L)  reg_gz_h <= rx_data;
+                        else if (seq_next_state == SEQ_READ_STOP)      reg_gz_l <= rx_data;
                         
-                        // Latch outputs when read sequence completes STOP phase
+                        // Latch all outputs when read sequence completes STOP phase
                         if (seq_next_state == SEQ_READ_DELAY) begin
-                            gyro_x <= {reg_x_h, reg_x_l};
-                            gyro_y <= {reg_y_h, reg_y_l};
-                            gyro_z <= {reg_z_h, reg_z_l};
-                            valid  <= 1'b1;
-                            error  <= 1'b0;
+                            accel_x <= {reg_ax_h, reg_ax_l};
+                            accel_y <= {reg_ay_h, reg_ay_l};
+                            accel_z <= {reg_az_h, reg_az_l};
+                            gyro_x  <= {reg_gx_h, reg_gx_l};
+                            gyro_y  <= {reg_gy_h, reg_gy_l};
+                            gyro_z  <= {reg_gz_h, reg_gz_l};
+                            valid   <= 1'b1;
+                            error   <= 1'b0;
                         end
 
                         // Check for Slave ACK/NACK errors on write operations
@@ -478,7 +563,7 @@ module i2c_master (
                              seq_next_state == SEQ_INIT_WAKE_STOP     ||
                              seq_next_state == SEQ_READ_REG_ADDR      ||
                              seq_next_state == SEQ_READ_REP_START     ||
-                             seq_next_state == SEQ_READ_DATA_X_H)     && rx_ack) begin
+                             seq_next_state == SEQ_READ_ACCEL_X_H)    && rx_ack) begin
                             state_reg <= SEQ_ERROR_STOP;
                         end else begin
                             state_reg <= seq_next_state;

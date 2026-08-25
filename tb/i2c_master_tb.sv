@@ -7,6 +7,9 @@ module i2c_master_tb();
     logic        rst_n;
     tri1         scl;
     tri1         sda;
+    logic [15:0] accel_x;
+    logic [15:0] accel_y;
+    logic [15:0] accel_z;
     logic [15:0] gyro_x;
     logic [15:0] gyro_y;
     logic [15:0] gyro_z;
@@ -19,6 +22,9 @@ module i2c_master_tb();
         .rst_n(rst_n),
         .scl(scl),
         .sda(sda),
+        .accel_x(accel_x),
+        .accel_y(accel_y),
+        .accel_z(accel_z),
         .gyro_x(gyro_x),
         .gyro_y(gyro_y),
         .gyro_z(gyro_z),
@@ -42,16 +48,30 @@ module i2c_master_tb();
         #41.67;
     end
 
-    // 5. Monitor Output Values
+    // 5. Monitor Output Values & Automated Assertions
+    int valid_read_count = 0;
+    int error_count = 0;
+
     always @(posedge valid) begin
-        $display("[TB MONITOR] Time = %0.3f ms | New Gyro Data Received!", $realtime / 1.0e6);
-        $display("             Roll  (X): %d (0x%h)", $signed(gyro_x), gyro_x);
-        $display("             Pitch (Y): %d (0x%h)", $signed(gyro_y), gyro_y);
-        $display("             Yaw   (Z): %d (0x%h)", $signed(gyro_z), gyro_z);
+        valid_read_count++;
+        $display("[TB MONITOR] Time = %0.3f ms | 14-Byte IMU Burst Read #%0d Received:", $realtime / 1.0e6, valid_read_count);
+        $display("             Accel (X,Y,Z): %d, %d, %d (0x%h, 0x%h, 0x%h)", 
+                 $signed(accel_x), $signed(accel_y), $signed(accel_z), accel_x, accel_y, accel_z);
+        $display("             Gyro  (X,Y,Z): %d, %d, %d (0x%h, 0x%h, 0x%h)", 
+                 $signed(gyro_x), $signed(gyro_y), $signed(gyro_z), gyro_x, gyro_y, gyro_z);
+
+        if (accel_x === 16'h0102 && accel_y === 16'h0304 && accel_z === 16'h4000 &&
+            gyro_x === 16'h1234 && gyro_y === 16'h5678 && gyro_z === 16'h9ABC) begin
+            $display("[TB CHECK] PASS: Sample #%0d values match expected registers exactly!", valid_read_count);
+        end else begin
+            $display("[TB CHECK] FAIL: Sample #%0d data mismatch!", valid_read_count);
+            error_count++;
+        end
     end
 
     always @(posedge error) begin
         $display("[TB MONITOR] Time = %0.3f ms | Error condition detected!", $realtime / 1.0e6);
+        error_count++;
     end
 
     // 6. Test Stimulus Block
@@ -69,7 +89,15 @@ module i2c_master_tb();
         // Total simulation: 25 milliseconds
         #25000000;
 
-        $display("[TB] Simulation complete. No lockups detected.");
+        $display("\n=================================================");
+        $display("[TB SUMMARY] Total valid gyro reads: %0d", valid_read_count);
+        $display("[TB SUMMARY] Total errors: %0d", error_count);
+        if (valid_read_count >= 3 && error_count == 0) begin
+            $display("[TB] PASS: All I2C Master transactions verified successfully!");
+        end else begin
+            $display("[TB] FAIL: I2C Master verification failed!");
+        end
+        $display("=================================================");
         $finish;
     end
 
@@ -151,6 +179,14 @@ module i2c_slave_model (
 
     initial begin
         // Populate MPU-6050 registers with known mock data
+        registers[8'h3B] = 8'h01; // ACCEL_XOUT_H
+        registers[8'h3C] = 8'h02; // ACCEL_XOUT_L
+        registers[8'h3D] = 8'h03; // ACCEL_YOUT_H
+        registers[8'h3E] = 8'h04; // ACCEL_YOUT_L
+        registers[8'h3F] = 8'h40; // ACCEL_ZOUT_H
+        registers[8'h40] = 8'h00; // ACCEL_ZOUT_L
+        registers[8'h41] = 8'h00; // TEMP_OUT_H
+        registers[8'h42] = 8'h00; // TEMP_OUT_L
         registers[8'h43] = 8'h12; // GYRO_XOUT_H
         registers[8'h44] = 8'h34; // GYRO_XOUT_L
         registers[8'h45] = 8'h56; // GYRO_YOUT_H
