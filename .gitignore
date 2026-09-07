@@ -21,3 +21,7 @@ Work/
 
 # Sandboxed Simulation Outputs
 vivado/
+
+# Agent artifacts
+walkthrough.md
+implementation_plan.md
