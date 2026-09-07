@@ -1,9 +1,20 @@
 # ==============================================================================
 # FPGA Quadcopter Flight Controller - Simulation Makefile
 # Supports AMD Vivado (xsim, default) and Icarus Verilog (iverilog)
+# Cross-platform: Linux, macOS, Windows (PowerShell / MSYS / Git Bash)
 # ==============================================================================
 
 SIM ?= vivado
+
+# Auto-detect Windows and configure paths
+ifeq ($(OS),Windows_NT)
+    # Default Vivado install location if not already in system PATH
+    VIVADO_BIN ?= C:/AMDDesignTools/2025.2.1/Vivado/bin
+    export PATH := $(VIVADO_BIN);$(PATH)
+    RM_CMD = powershell -NoProfile -ExecutionPolicy Bypass -Command "Remove-Item -Force -Recurse -ErrorAction SilentlyContinue *.log, *.jou, *.pb, *.wdb, *.vcd, *.out, xsim.dir, .Xil; exit 0"
+else
+    RM_CMD = rm -rf *.log *.jou *.pb *.wdb *.vcd *.out xsim.dir .Xil
+endif
 
 # RTL Design Sources
 RTL_SRCS = \
@@ -17,16 +28,16 @@ RTL_SRCS = \
 	rtl/i2c_master.sv \
 	rtl/flight_core.sv
 
-# Testbench Directory & Names
+# Testbench Directory & Targets
 TB_DIR = tb
 TESTBENCHES = \
-	flight_core_tb \
-	attitude_estimator_tb \
-	pid_calculator_tb \
+	pwm_generator_tb \
 	motor_mixer_tb \
+	pid_calculator_tb \
 	rc_receiver_tb \
+	attitude_estimator_tb \
 	i2c_master_tb \
-	pwm_generator_tb
+	flight_core_tb
 
 .PHONY: all sim test clean help $(TESTBENCHES)
 
@@ -34,25 +45,25 @@ all: test
 sim: test
 
 help:
-	@echo "FPGA Flight Controller Verification Suite"
-	@echo "Usage:"
-	@echo "  make test              Run all testbenches (default: SIM=vivado)"
-	@echo "  make sim               Alias for make test"
-	@echo "  make <tb_name>         Run specific testbench (e.g., make flight_core_tb)"
-	@echo "  make clean             Remove simulation artifacts and logs"
-	@echo ""
-	@echo "Available testbenches:"
-	@echo "  flight_core_tb         Full closed-loop system simulation"
-	@echo "  attitude_estimator_tb  6-DOF complementary filter test"
-	@echo "  pid_calculator_tb      Q8.8 fixed-point PID controller test"
-	@echo "  motor_mixer_tb         Quad-X mixer and saturation clamping test"
-	@echo "  rc_receiver_tb         4-channel pulse decoder and watchdog test"
-	@echo "  i2c_master_tb          MPU-6050 400 kHz I2C master test"
-	@echo "  pwm_generator_tb       400 Hz double-buffered PWM generator test"
-	@echo ""
-	@echo "Supported simulators (override via SIM=<simulator>):"
-	@echo "  SIM=vivado             AMD Vivado xvlog/xelab/xsim (default)"
-	@echo "  SIM=iverilog           Icarus Verilog iverilog/vvp (IEEE 1800-2012)"
+	@echo FPGA Flight Controller Verification Suite
+	@echo Usage:
+	@echo   make test              Run all testbenches (default: SIM=vivado)
+	@echo   make sim               Alias for make test
+	@echo   make clean             Remove simulation artifacts and logs
+	@echo   make <tb_name>         Run specific testbench (e.g., make flight_core_tb)
+	@echo.
+	@echo Available testbenches:
+	@echo   flight_core_tb         Full closed-loop system simulation
+	@echo   attitude_estimator_tb  6-DOF complementary filter test
+	@echo   pid_calculator_tb      Q8.8 fixed-point PID controller test
+	@echo   motor_mixer_tb         Quad-X mixer and saturation clamping test
+	@echo   rc_receiver_tb         4-channel pulse decoder and watchdog test
+	@echo   i2c_master_tb          MPU-6050 400 kHz I2C master test
+	@echo   pwm_generator_tb       400 Hz double-buffered PWM generator test
+	@echo.
+	@echo Supported simulators (override via SIM=^<simulator^>):
+	@echo   SIM=vivado             AMD Vivado xvlog/xelab/xsim (default)
+	@echo   SIM=iverilog           Icarus Verilog iverilog/vvp (IEEE 1800-2012)
 
 test: $(TESTBENCHES)
 
@@ -135,4 +146,4 @@ endif
 # Clean Artifacts
 # ------------------------------------------------------------------------------
 clean:
-	rm -rf *.log *.jou *.pb *.wdb *.vcd *.out xsim.dir .Xil
+	$(RM_CMD)
