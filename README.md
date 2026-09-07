@@ -36,62 +36,36 @@ For complete mathematical derivations, register maps, and architectural specific
 
 The top-level hardware entity ([`rtl/flight_core.sv`](rtl/flight_core.sv)) coordinates sensor acquisition, pilot command mapping, safety state machines, dual-loop PID control, and motor output generation:
 
-```mermaid
-flowchart TD
-    subgraph Inputs ["External Inputs"]
-        RC_IN["RC Receiver<br/>(4x PWM Channels: Roll, Pitch, Yaw, Throttle)"]
-        IMU_IN["MPU-6050 6-DOF IMU<br/>(I2C Fast-Mode: SCL / SDA @ 400 kHz)"]
-    end
-
-    subgraph FPGA ["FPGA Fabric (flight_core)"]
-        direction TB
-
-        subgraph Ingestion ["Sensor & Command Processing"]
-            RC_RX["rc_receiver<br/>(2-Stage FF Sync & Pulse Timing)"]
-            RC_MAP["rc_mapper<br/>(Deadband & Setpoint Scaling)"]
-            I2C_M["i2c_master<br/>(14-Byte Burst Reader @ 1 kHz)"]
-            ATT_EST["attitude_estimator<br/>(Q16.16 Complementary Filter)"]
-            SAFETY["safety_mgr<br/>(Arm/Disarm FSM & Watchdog Failsafe)"]
-        end
-
-        subgraph ControlCore ["Flight Control Core"]
-            PID_OUTER["pid_calculator (Angle P-Loop)<br/>Tilt Angle Error to Target Rates"]
-            PID_INNER["pid_calculator (Rate PID-Loop)<br/>Angular Rate Error to Corrections"]
-        end
-
-        subgraph Actuation ["Motor Mixing & Output Generation"]
-            MIXER["motor_mixer<br/>(Quad-X Matrix & Saturation Clamp)"]
-            PWM_GEN["pwm_generator<br/>(4x 400 Hz Glitch-Free Shadow Regs)"]
-        end
-
-        RC_IN --> RC_RX
-        RC_RX --> RC_MAP
-        RC_RX --> SAFETY
-
-        IMU_IN <--> I2C_M
-        I2C_M --> ATT_EST
-        I2C_M --> PID_INNER
-
-        RC_MAP --> PID_OUTER
-        RC_MAP --> PID_INNER
-        RC_MAP --> SAFETY
-        RC_MAP --> MIXER
-
-        ATT_EST --> PID_OUTER
-        PID_OUTER --> PID_INNER
-
-        SAFETY --> MIXER
-        SAFETY --> PID_INNER
-
-        PID_INNER --> MIXER
-        MIXER --> PWM_GEN
-    end
-
-    subgraph Outputs ["External Outputs"]
-        ESC_OUT["4x Motor ESCs<br/>(1.0 ms - 2.0 ms PWM @ 400 Hz)"]
-    end
-
-    PWM_GEN --> ESC_OUT
+```text
+   EXTERNAL INPUTS                         FPGA FABRIC (flight_core)                           EXTERNAL OUTPUTS
++-------------------+       +---------------------------------------------------+       +--------------------+
+|                   |       |  +-------------+     +-----------+                |       |                    |
+|    RC Receiver    |------>|  | rc_receiver |---> | rc_mapper |---------+      |       |                    |
+| 4-Ch PWM (50 Hz)  |       |  +-------------+     +-----------+         |      |       |                    |
+|                   |       |         |                                  |      |       |                    |
++-------------------+       |         v                                  v      |       |                    |
+                            |  +------------+                     +-----------+ |       |                    |
+                            |  | safety_mgr |                     | Angle PID | |       |                    |
+                            |  | (Arm/Lock) |                     |  (Outer)  | |       |                    |
+                            |  +------------+                     +-----------+ |       |                    |
+                            |         |                                 |       |       |                    |
++-------------------+       |         |                                 v       |       |                    |
+|                   |       |  +------------+   +--------------+  +-----------+ |       |                    |
+|   MPU-6050 IMU    |<=====>|  | i2c_master |-->| attitude_est |->| Rate PID  | |       |    4x Motor ESCs   |
+|  I2C Bus (400kHz) |       |  +------------+   +--------------+  |  (Inner)  | |       | 400 Hz PWM Signals |
+|                   |       |        |                                  |       |       | (1.0 ms - 2.0 ms)  |
++-------------------+       |        +--------------------------------->+       |       |                    |
+                            |         |                                 |       |       |                    |
+                            |         v                                 v       |       |                    |
+                            |  +----------------------------------------------+ |       |                    |
+                            |  |                 motor_mixer                  | |       |                    |
+                            |  +----------------------------------------------+ |       |                    |
+                            |                         |                         |       |                    |
+                            |                         v                         |       |                    |
+                            |  +----------------------------------------------+ |       |                    |
+                            |  |                pwm_generator                 |------->|                    |
+                            |  +----------------------------------------------+ |       |                    |
+                            +---------------------------------------------------+       +--------------------+
 ```
 
 *(Detailed register interfaces, pin mappings, and mathematical models are documented in [`docs/flight_controller_spec.md`](docs/flight_controller_spec.md).)*
