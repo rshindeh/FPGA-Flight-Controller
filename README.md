@@ -26,34 +26,72 @@ For complete mathematical derivations, register maps, and architectural specific
 | [`tb/`](tb/) | Comprehensive simulation testbenches with self-checking assertions. |
 | [`constraints/`](constraints/) | Physical pinout and clock constraints for Digilent Cmod A7 (`cmod_a7_pins.xdc`). |
 | [`docs/`](docs/) | Engineering specifications, design requirements, and verification summaries. |
+| [`Makefile`](Makefile) | Simulation and verification automation runner for Vivado (`xsim`) and Icarus Verilog. |
 | [`docs/flight_controller_spec.md`](docs/flight_controller_spec.md) | Comprehensive engineering specification and control loop mathematics. |
 | [`docs/verification_summary.md`](docs/verification_summary.md) | Testbench results, bug resolution log, and validation metrics. |
 
 ---
 
-## Architecture & Top-Level Block Diagram
+## Architecture & Hardware Pipeline
 
-The top-level hardware entity ([`rtl/flight_core.sv`](rtl/flight_core.sv)) coordinates sensor ingestion, pilot command mapping, safety state machines, dual-loop PID processing, and motor output generation:
+The top-level hardware entity ([`rtl/flight_core.sv`](rtl/flight_core.sv)) coordinates sensor acquisition, pilot command mapping, safety state machines, dual-loop PID control, and motor output generation:
 
-```
-                      +--------------------------------------------------------+
-                      |                      flight_core                       |
-                      |                                                        |
-  [RC Receiver] ----->| rc_receiver ---> rc_mapper --------+                   |
-  (4x PWM In)         |     |                               | (Angle Desired)  |
-                      |     +----------> safety_mgr --+     v                  |
-                      |                  (Arm/Failsafe)| [Outer Angle Loop]    |
-                      |                               |         |              |
-                      |                               | (Rate)  v              |
-  [MPU-6050 IMU] <--->| i2c_master -> attitude_est ---+---> [Inner Rate Loop]   |
-  (I2C Fast Mode)     |                                         |              |
-                      |                                         v (Corrections)|
-                      |                                    motor_mixer         |
-                      |                                         |              |
-                      |                                         v              |
-                      |                                   pwm_generator ------>| [4x ESC PWM Out]
-                      |                                   (400 Hz Frame)       | (1.0ms - 2.0ms)
-                      +--------------------------------------------------------+
+```mermaid
+flowchart TD
+    subgraph Inputs ["External Inputs"]
+        RC_IN["RC Receiver<br/>(4x PWM Channels: Roll, Pitch, Yaw, Throttle)"]
+        IMU_IN["MPU-6050 6-DOF IMU<br/>(I2C Fast-Mode: SCL / SDA @ 400 kHz)"]
+    end
+
+    subgraph FPGA ["FPGA Fabric (flight_core)"]
+        direction TB
+
+        subgraph Ingestion ["Sensor & Command Processing"]
+            RC_RX["rc_receiver<br/>(2-Stage FF Sync & Pulse Timing)"]
+            RC_MAP["rc_mapper<br/>(Deadband & Setpoint Scaling)"]
+            I2C_M["i2c_master<br/>(14-Byte Burst Reader @ 1 kHz)"]
+            ATT_EST["attitude_estimator<br/>(Q16.16 Complementary Filter)"]
+            SAFETY["safety_mgr<br/>(Arm/Disarm FSM & Watchdog Failsafe)"]
+        end
+
+        subgraph ControlCore ["Flight Control Core"]
+            PID_OUTER["pid_calculator (Angle P-Loop)<br/>Tilt Angle Error to Target Rates"]
+            PID_INNER["pid_calculator (Rate PID-Loop)<br/>Angular Rate Error to Corrections"]
+        end
+
+        subgraph Actuation ["Motor Mixing & Output Generation"]
+            MIXER["motor_mixer<br/>(Quad-X Matrix & Saturation Clamp)"]
+            PWM_GEN["pwm_generator<br/>(4x 400 Hz Glitch-Free Shadow Regs)"]
+        end
+
+        RC_IN --> RC_RX
+        RC_RX --> RC_MAP
+        RC_RX --> SAFETY
+
+        IMU_IN <--> I2C_M
+        I2C_M --> ATT_EST
+        I2C_M --> PID_INNER
+
+        RC_MAP --> PID_OUTER
+        RC_MAP --> PID_INNER
+        RC_MAP --> SAFETY
+        RC_MAP --> MIXER
+
+        ATT_EST --> PID_OUTER
+        PID_OUTER --> PID_INNER
+
+        SAFETY --> MIXER
+        SAFETY --> PID_INNER
+
+        PID_INNER --> MIXER
+        MIXER --> PWM_GEN
+    end
+
+    subgraph Outputs ["External Outputs"]
+        ESC_OUT["4x Motor ESCs<br/>(1.0 ms - 2.0 ms PWM @ 400 Hz)"]
+    end
+
+    PWM_GEN --> ESC_OUT
 ```
 
 *(Detailed register interfaces, pin mappings, and mathematical models are documented in [`docs/flight_controller_spec.md`](docs/flight_controller_spec.md).)*
@@ -91,9 +129,9 @@ The design is targeted for physical deployment on standard quadcopter avionics h
 
 ---
 
-## Verification & Simulation Status
+## Verification & Simulation
 
-The design has been verified using self-checking SystemVerilog testbenches in AMD Vivado Simulator (`xsim`). Full simulation details and defect resolution history are documented in [`docs/verification_summary.md`](docs/verification_summary.md).
+The design includes a comprehensive verification suite with self-checking SystemVerilog testbenches. Full defect resolution history and verification metrics are documented in [`docs/verification_summary.md`](docs/verification_summary.md).
 
 | Testbench | Target Module | Scope & Verified Conditions | Simulation Status |
 | :--- | :--- | :--- | :--- |
@@ -105,17 +143,35 @@ The design has been verified using self-checking SystemVerilog testbenches in AM
 | `motor_mixer_tb` | `motor_mixer` | Quad-X differential thrust matrix, disarm lockout, saturation limits | **PASSED** (0 Errors) |
 | `pwm_generator_tb` | `pwm_generator` | 400 Hz frame timing, pulse fidelity, shadow register glitch prevention | **PASSED** (0 Errors) |
 
-### How to Run Simulations
+---
 
-Simulations can be compiled and executed directly from PowerShell or Bash with Vivado command-line utilities:
+## Quickstart / Simulation Automation
 
+A top-level [`Makefile`](Makefile) automates compilation, elaboration, and execution across all testbenches.
+
+### 1. Run with Make (Default: AMD Vivado xsim)
+```bash
+# Run all testbenches
+make test
+
+# Run a specific testbench
+make flight_core_tb
+make attitude_estimator_tb
+
+# Clean simulation outputs
+make clean
+```
+
+*To run with Icarus Verilog instead, append `SIM=iverilog` (e.g., `make test SIM=iverilog`).*
+
+### 2. Run Directly with AMD Vivado CLI (PowerShell / Windows)
 ```powershell
-# Run Full Closed-Loop Flight Core Simulation
+# Run full closed-loop system simulation
 xvlog -sv rtl/*.sv tb/flight_core_tb.sv
 xelab -debug typical flight_core_tb -s flight_sim
 xsim flight_sim -R
 
-# Run Attitude Estimator Unit Testbench
+# Run individual unit test (e.g., attitude estimator)
 xvlog -sv rtl/attitude_estimator.sv tb/attitude_estimator_tb.sv
 xelab -debug typical attitude_estimator_tb -s att_sim
 xsim att_sim -R
