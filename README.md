@@ -56,34 +56,22 @@ The top-level hardware entity ([`rtl/flight_core.sv`](rtl/flight_core.sv)) coord
                       +--------------------------------------------------------+
 ```
 
-*(Detailed block diagrams and register interface schematics can be found in [`docs/flight_controller_spec.md`](docs/flight_controller_spec.md).)*
+*(Detailed register interfaces, pin mappings, and mathematical models are documented in [`docs/flight_controller_spec.md`](docs/flight_controller_spec.md).)*
 
 ---
 
-## Hardware Resource Utilization & Timing
+## Hardware Platform & Target Peripherals
 
-Target Device: **Xilinx Artix-7 XC7A35T-1CPG236C** (Digilent Cmod A7-35T)  
-Synthesis & Implementation Toolchain: **AMD Vivado Design Suite**  
-Master Clock: **12.0 MHz** (`cmod_a7_pins.xdc`)
+The design is targeted for physical deployment on standard quadcopter avionics hardware:
 
-### Post-Implementation Utilization (Placeholder)
-
-| Resource | Used | Available | Utilization % |
-| :--- | :--- | :--- | :--- |
-| **LUT (Logic)** | *TBD* | 20,800 | *TBD* |
-| **LUTRAM** | *TBD* | 9,600 | *TBD* |
-| **Flip-Flops (FF)** | *TBD* | 41,600 | *TBD* |
-| **DSP48E1 Slices** | *TBD* | 90 | *TBD* |
-| **Block RAM (BRAM)** | *TBD* | 50 | *TBD* |
-| **IOB Pins** | 10 | 106 | ~9.4% |
-
-### Timing & Frequency Performance (Placeholder)
-
-| Metric | Target Constraint | Achieved (Worst Case) | Timing Slack |
-| :--- | :--- | :--- | :--- |
-| **Master Clock (`clk`)** | 12.000 MHz (83.33 ns) | *TBD* | *TBD* |
-| **Max Operating Frequency ($F_{\text{max}}$)** | > 12.0 MHz | *TBD* | *TBD* |
-| **Worst Negative Slack (WNS)** | >= 0.000 ns | *TBD* | *TBD* |
+- **Target FPGA:** AMD/Xilinx Artix-7 XC7A35T-1CPG236C (Digilent Cmod A7-35T breadboard-friendly form factor).
+- **Master Clock:** 12.0 MHz on-board oscillator constraint (`cmod_a7_pins.xdc`), providing an 83.33 ns base clock tick.
+- **Inertial Measurement Unit (IMU):** InvenSense MPU-6050 6-DOF sensor connected via open-drain I2C (`M3` / `L3`). The custom master streams 14-byte sensor bursts at 400 kHz Fast-Mode with a 1 kHz update rate.
+- **Pilot RC Interface:** 4 input channels (Roll, Pitch, Yaw, Throttle) accepting standard 50 Hz PWM signals (1.0 ms to 2.0 ms pulse width) with two-stage flip-flop synchronizers and a 100 ms loss-of-signal watchdog timer.
+- **ESC / Motor Drive:** 4 output channels configured for Quad-X motor layouts driving ESCs at 400 Hz frame rate with double-buffered shadow registers to ensure glitch-free pulse width transitions.
+- **Arithmetic Processing:** Synthesizable fixed-point arithmetic units:
+  - 32-bit Q16.16 complementary filter for real-time attitude estimation (gyro integration + accelerometer gravity compensation).
+  - 16-bit Q8.8 cascaded PID pipelines with anti-windup clamping and dynamic integral reset.
 
 ---
 
@@ -103,20 +91,31 @@ Master Clock: **12.0 MHz** (`cmod_a7_pins.xdc`)
 
 ---
 
-## Verification & Simulation
+## Verification & Simulation Status
 
-All modules are verified with automated, self-checking SystemVerilog testbenches. For details on test results and previous bug resolutions, refer to [`docs/verification_summary.md`](docs/verification_summary.md).
+The design has been verified using self-checking SystemVerilog testbenches in AMD Vivado Simulator (`xsim`). Full simulation details and defect resolution history are documented in [`docs/verification_summary.md`](docs/verification_summary.md).
 
-### Run Full System Simulation
+| Testbench | Target Module | Scope & Verified Conditions | Simulation Status |
+| :--- | :--- | :--- | :--- |
+| `flight_core_tb` | `flight_core` | Closed-loop arming sequence, tilt auto-leveling, throttle mixing | **PASSED** (0 Errors) |
+| `attitude_estimator_tb` | `attitude_estimator` | Level hover, static roll/pitch convergence, gyro drift rejection | **PASSED** (0 Errors) |
+| `i2c_master_tb` | `i2c_master` | 400 kHz SCL clock generation, MPU-6050 wake-up write, burst reads | **PASSED** (0 Errors) |
+| `rc_receiver_tb` | `rc_receiver` | 2-stage FF synchronization, pulse width decoding, 100 ms watchdog | **PASSED** (0 Errors) |
+| `pid_calculator_tb` | `pid_calculator` | Q8.8 P/I/D responses, anti-windup clamping, dynamic `clear_i` reset | **PASSED** (0 Errors) |
+| `motor_mixer_tb` | `motor_mixer` | Quad-X differential thrust matrix, disarm lockout, saturation limits | **PASSED** (0 Errors) |
+| `pwm_generator_tb` | `pwm_generator` | 400 Hz frame timing, pulse fidelity, shadow register glitch prevention | **PASSED** (0 Errors) |
+
+### How to Run Simulations
+
+Simulations can be compiled and executed directly from PowerShell or Bash with Vivado command-line utilities:
+
 ```powershell
+# Run Full Closed-Loop Flight Core Simulation
 xvlog -sv rtl/*.sv tb/flight_core_tb.sv
 xelab -debug typical flight_core_tb -s flight_sim
 xsim flight_sim -R
-```
 
-### Run Unit Testbenches
-```powershell
-# Example: Attitude Estimator unit test
+# Run Attitude Estimator Unit Testbench
 xvlog -sv rtl/attitude_estimator.sv tb/attitude_estimator_tb.sv
 xelab -debug typical attitude_estimator_tb -s att_sim
 xsim att_sim -R
