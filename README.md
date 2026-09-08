@@ -37,36 +37,52 @@ For complete mathematical derivations, register maps, and architectural specific
 The top-level hardware entity ([`rtl/flight_core.sv`](rtl/flight_core.sv)) coordinates sensor acquisition, pilot command mapping, safety state machines, dual-loop PID control, and motor output generation:
 
 ```text
-   EXTERNAL INPUTS                         FPGA FABRIC (flight_core)                           EXTERNAL OUTPUTS
-+-------------------+       +---------------------------------------------------+       +--------------------+
-|                   |       |  +-------------+                 +-------------+  |       |                    |
-|    RC Receiver    |------>|  | rc_receiver |--(Sticks)------>|  rc_mapper  |  |       |                    |
-| 4-Ch PWM (50 Hz)  |       |  +-------------+                 +-------------+  |       |                    |
-|                   |       |         |                         |            |  |       |                    |
-+-------------------+       |         v (Sticks)   (Target Ang) v            |  |       |                    |
-                            |  +------------+  +------------+ +-----------+  |  |       |                    |
-                            |  | safety_mgr |  |attitude_est|-> Angle PID |  |  |       |                    |
-                            |  +------------+  +------------+ |  (Outer)  |  |  |       |                    |
-                            |        |               ^        +-----------+  |  |       |                    |
-+-------------------+       |        |               |              | (Rate) |  |       |    4x Motor ESCs   |
-|   MPU-6050 IMU    |<=====>|  +------------+ (IMU)  |              v        |  |       | 400 Hz PWM Signals |
-|  I2C Bus (400kHz) |       |  | i2c_master |--------+        +-----------+  |  |       | (1.0 ms - 2.0 ms)  |
-|                   |       |  +------------+                 | Rate PID  |  |  |       |                    |
-+-------------------+       |    |         |                  |  (Inner)  |  |  |       |                    |
-                            |    | (Armed) +--(Gyro Rates)--->+-----------+  |  |       |                    |
-                            |    |                                  | (PID)  |  |       |                    |
-                            |    |   +------------------------------+        |  |       |                    |
-                            |    |   |     (Throttle Bypass) <---------------+  |       |                    |
-                            |    v   v                       v                  |       |                    |
-                            |  +----------------------------------------------+ |       |                    |
-                            |  |                 motor_mixer                  | |       |                    |
-                            |  +----------------------------------------------+ |       |                    |
-                            |                         |                         |       |                    |
-                            |                         v                         |       |                    |
-                            |  +----------------------------------------------+ |       |                    |
-                            |  |                pwm_generator                 |-------->|                    |
-                            |  +----------------------------------------------+ |       |                    |
-                            +---------------------------------------------------+       +--------------------+
+   PILOT INPUT PATH                              SENSOR PATH
+   ================                              ===========
+ [ RC Receiver Pins ]                         [ MPU-6050 I2C Bus ]
+          |                                            |
+          v                                            v
+   +-------------+                              +--------------+
+   | rc_receiver |                              |  i2c_master  |
+   +-------------+                              +--------------+
+      |       |                                    |        |
+      |       | (Sticks)              (Accel/Gyro) |        | (Gyro Rates)
+      v       v                                    v        |
++------------+ +-----------+                +--------------+ |
+| safety_mgr | | rc_mapper |                | attitude_est | |
++------------+ +-----------+                +--------------+ |
+      |          |       |                         |        |
+      |          |       | (Target Angles)         | (Est.) |
+      |          |       +--------------+   +------+        |
+      |          |                      |   |               |
+      |          |                      v   v               |
+      |          |               +----------------+         |
+      |          |               | pid_calculator | (Outer Angle Loop)
+      |          |               +----------------+         |
+      |          |                       |                  |
+      |          |                       | (Desired Rates)  |
+      |          |                       v                  |
+      |          |               +----------------+         |
+      |          |               | pid_calculator |<--------+ (Inner Rate Loop)
+      |          |               +----------------+
+      |          |                       |
+      |          | (Throttle Bypass)     | (Torque Corrections)
+      |          |                       |
+      |          +--------------+ +------+
+      |                         | |
+      | (Armed Lockout)         v v
+      |                  +-------------+
+      +----------------->| motor_mixer |
+                         +-------------+
+                                |
+                                | (Motor Duty Cycles)
+                                v
+                        +---------------+
+                        | pwm_generator |
+                        +---------------+
+                                |
+                                v
+                      [ 4x ESC PWM Outputs ]
 ```
 
 *(Detailed register interfaces, pin mappings, and mathematical models are documented in [`docs/flight_controller_spec.md`](docs/flight_controller_spec.md).)*
