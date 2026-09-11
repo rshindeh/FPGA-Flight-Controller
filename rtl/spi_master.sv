@@ -50,7 +50,7 @@ module spi_master #(
     localparam logic [7:0] SPI_READ_FLAG     = 8'h80; // Bit 7 = 1 for SPI Read
 
     // -------------------------------------------------------------------------
-    // Finite State Machine Definition
+    // Finite State Machine Definition (names preserved for hierarchical TB probes)
     // -------------------------------------------------------------------------
     typedef enum logic [3:0] {
         STATE_POWER_ON_WAIT,
@@ -63,7 +63,7 @@ module spi_master #(
         STATE_IDLE_WAIT_SAMPLE,  // Wait for 1 kHz sample interval
         STATE_BURST_READ_STREAM, // 15-byte continuous read (1 addr + 14 data)
         STATE_LATCH_OUTPUTS,     // Strobe valid flag, update registers
-        STATE_ERROR              // Error state if WHO_AM_I mismatch
+        STATE_ERROR              // Error state if WHO_AM_I mismatch (probed in TB)
     } state_t;
 
     state_t state_reg;
@@ -102,10 +102,6 @@ module spi_master #(
     // -------------------------------------------------------------------------
     // 1. SPI Low-Level Bit/Byte Serialization Engine (SPI Mode 0)
     // -------------------------------------------------------------------------
-    // In Mode 0:
-    // - sclk idles LOW (0)
-    // - MOSI is set up before/on falling SCLK edge
-    // - MISO is sampled on rising SCLK edge
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             sclk_reg     <= 1'b0;
@@ -117,7 +113,7 @@ module spi_master #(
             engine_busy  <= 1'b0;
             spi_done     <= 1'b0;
             rx_shift     <= 8'd0;
-            for (int i = 0; i < 15; i++) rx_buf[i] <= 8'd0;
+            rx_buf       <= '{default: 8'h00};
         end else begin
             spi_done <= 1'b0;
 
@@ -130,7 +126,7 @@ module spi_master #(
 
                 if (spi_start) begin
                     engine_busy <= 1'b1;
-                    cs_n_reg    <= 1'b0; // Assert Chip Select
+                    cs_n_reg    <= 1'b0;         // Assert Chip Select
                     mosi_reg    <= tx_buf[0][7]; // Present first MSB immediately
                     clk_div_cnt <= 4'd0;
                 end
@@ -152,10 +148,10 @@ module spi_master #(
                         if (bit_idx == 3'd0) begin
                             // Completed current byte
                             rx_buf[byte_idx] <= rx_shift;
-                            bit_idx <= 3'd7;
+                            bit_idx          <= 3'd7;
 
                             if (byte_idx == spi_total_bytes - 5'd1) begin
-                                // Transaction finished!
+                                // Entire transaction finished
                                 engine_busy <= 1'b0;
                                 cs_n_reg    <= 1'b1; // Deassert Chip Select
                                 spi_done    <= 1'b1;
@@ -172,6 +168,16 @@ module spi_master #(
             end
         end
     end
+
+    // Helper task to initiate 2-byte register write/read transactions cleanly
+    task automatic start_2byte_spi(input logic [7:0] reg_addr, input logic [7:0] reg_data);
+        spi_div_limit      <= DIV_HALF_PERIOD_INIT;
+        spi_total_bytes    <= 5'd2;
+        tx_buf[0]          <= reg_addr;
+        tx_buf[1]          <= reg_data;
+        spi_start          <= 1'b1;
+        transaction_active <= 1'b1;
+    endtask
 
     // -------------------------------------------------------------------------
     // 2. High-Level Protocol FSM & Sample Sequencer
@@ -195,7 +201,7 @@ module spi_master #(
             gyro_y             <= 16'd0;
             gyro_z             <= 16'd0;
 
-            for (int j = 0; j < 15; j++) tx_buf[j] <= 8'd0;
+            tx_buf             <= '{default: 8'h00};
         end else begin
             valid     <= 1'b0;
             spi_start <= 1'b0;
@@ -213,12 +219,7 @@ module spi_master #(
                 // Step 1: Write USER_CTRL (0x6A) = 0x10 (Disable I2C interface)
                 STATE_WRITE_USER_CTRL: begin
                     if (!transaction_active) begin
-                        spi_div_limit      <= DIV_HALF_PERIOD_INIT;
-                        spi_total_bytes    <= 5'd2;
-                        tx_buf[0]          <= REG_USER_CTRL; // Write operation: MSB = 0
-                        tx_buf[1]          <= 8'h10;         // I2C_IF_DIS = 1
-                        spi_start          <= 1'b1;
-                        transaction_active <= 1'b1;
+                        start_2byte_spi(REG_USER_CTRL, 8'h10); // I2C_IF_DIS = 1
                     end else if (spi_done) begin
                         transaction_active <= 1'b0;
                         state_reg          <= STATE_WRITE_PWR_MGMT_1;
@@ -228,12 +229,7 @@ module spi_master #(
                 // Step 2: Write PWR_MGMT_1 (0x6B) = 0x01 (Auto-select PLL gyro clock, wake from sleep)
                 STATE_WRITE_PWR_MGMT_1: begin
                     if (!transaction_active) begin
-                        spi_div_limit      <= DIV_HALF_PERIOD_INIT;
-                        spi_total_bytes    <= 5'd2;
-                        tx_buf[0]          <= REG_PWR_MGMT_1;
-                        tx_buf[1]          <= 8'h01;         // CLKSEL = 1 (PLL with Gyro reference), SLEEP = 0
-                        spi_start          <= 1'b1;
-                        transaction_active <= 1'b1;
+                        start_2byte_spi(REG_PWR_MGMT_1, 8'h01); // CLKSEL = 1, SLEEP = 0
                     end else if (spi_done) begin
                         transaction_active <= 1'b0;
                         state_reg          <= STATE_WRITE_GYRO_CFG;
@@ -243,12 +239,7 @@ module spi_master #(
                 // Step 3: Write GYRO_CONFIG (0x1B) = 0x00 (+/-250 deg/s scale, 131 LSB/deg/s)
                 STATE_WRITE_GYRO_CFG: begin
                     if (!transaction_active) begin
-                        spi_div_limit      <= DIV_HALF_PERIOD_INIT;
-                        spi_total_bytes    <= 5'd2;
-                        tx_buf[0]          <= REG_GYRO_CONFIG;
-                        tx_buf[1]          <= 8'h00;         // FS_SEL = 00 (+/-250 dps)
-                        spi_start          <= 1'b1;
-                        transaction_active <= 1'b1;
+                        start_2byte_spi(REG_GYRO_CONFIG, 8'h00); // FS_SEL = 00 (+/-250 dps)
                     end else if (spi_done) begin
                         transaction_active <= 1'b0;
                         state_reg          <= STATE_WRITE_ACCEL_CFG;
@@ -258,12 +249,7 @@ module spi_master #(
                 // Step 4: Write ACCEL_CONFIG (0x1C) = 0x00 (+/-2g scale, 16384 LSB/g)
                 STATE_WRITE_ACCEL_CFG: begin
                     if (!transaction_active) begin
-                        spi_div_limit      <= DIV_HALF_PERIOD_INIT;
-                        spi_total_bytes    <= 5'd2;
-                        tx_buf[0]          <= REG_ACCEL_CONFIG;
-                        tx_buf[1]          <= 8'h00;         // AFS_SEL = 00 (+/-2g)
-                        spi_start          <= 1'b1;
-                        transaction_active <= 1'b1;
+                        start_2byte_spi(REG_ACCEL_CONFIG, 8'h00); // AFS_SEL = 00 (+/-2g)
                     end else if (spi_done) begin
                         transaction_active <= 1'b0;
                         state_reg          <= STATE_READ_WHOAMI;
@@ -273,15 +259,10 @@ module spi_master #(
                 // Step 5: Read WHO_AM_I register (0x75)
                 STATE_READ_WHOAMI: begin
                     if (!transaction_active) begin
-                        spi_div_limit      <= DIV_HALF_PERIOD_INIT;
-                        spi_total_bytes    <= 5'd2;
-                        tx_buf[0]          <= REG_WHO_AM_I | SPI_READ_FLAG; // 0xF5 (Read WHO_AM_I)
-                        tx_buf[1]          <= 8'h00;                         // Dummy byte to clock out data
-                        spi_start          <= 1'b1;
-                        transaction_active <= 1'b1;
+                        start_2byte_spi(REG_WHO_AM_I | SPI_READ_FLAG, 8'h00); // Read WHO_AM_I
                     end else if (spi_done) begin
                         transaction_active <= 1'b0;
-                        // MPU-6500 returns 0x70; MPU-9250 returns 0x71; MPU-6000/6050 returns 0x68
+                        // MPU-6500 (0x70), MPU-9250 (0x71), MPU-6000 (0x68)
                         if (rx_buf[1] == 8'h70 || rx_buf[1] == 8'h71 || rx_buf[1] == 8'h68) begin
                             state_reg <= STATE_INIT_SETTLE_WAIT;
                             delay_cnt <= 20'd1200; // 100 us PLL settle delay
@@ -332,7 +313,7 @@ module spi_master #(
                     accel_x   <= {rx_buf[1],  rx_buf[2]};
                     accel_y   <= {rx_buf[3],  rx_buf[4]};
                     accel_z   <= {rx_buf[5],  rx_buf[6]};
-                    // rx_buf[7], rx_buf[8] is Temperature (unused in PID)
+                    // rx_buf[7], rx_buf[8] is Temperature (unused in PID pipelines)
                     gyro_x    <= {rx_buf[9],  rx_buf[10]};
                     gyro_y    <= {rx_buf[11], rx_buf[12]};
                     gyro_z    <= {rx_buf[13], rx_buf[14]};
@@ -341,10 +322,9 @@ module spi_master #(
                     state_reg <= STATE_IDLE_WAIT_SAMPLE;
                 end
 
-                // Fatal Identification Error
+                // Fatal Identification Error: Halt permanently until external reset
                 STATE_ERROR: begin
                     error <= 1'b1;
-                    // Remain halted in error state until reset
                 end
 
                 default: state_reg <= STATE_POWER_ON_WAIT;
@@ -353,3 +333,4 @@ module spi_master #(
     end
 
 endmodule
+

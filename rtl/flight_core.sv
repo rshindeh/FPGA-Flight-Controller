@@ -16,7 +16,7 @@ module flight_core #(
 
     // --- Internal Signals ---
     
-    // 1. RC Receiver Outputs
+    // 1. RC Receiver Outputs (probed in TB)
     logic [14:0] rc_channels [4]; // [0]=Roll, [1]=Pitch, [2]=Yaw, [3]=Throttle
     logic [3:0]  rc_valid;
     
@@ -26,19 +26,15 @@ module flight_core #(
     logic signed [15:0] target_yaw_rate;    // Target Rate (+/-100.0 deg/s)
     logic [14:0]        mapped_throttle;    // Clamped [12000, 24000]
 
-    // 3. Safety Manager Flags
+    // 3. Safety Manager Flags (probed in TB)
     logic armed;
     logic idle_throttle_active;
 
-    // 4. SPI Master 14-Byte Stream
-    logic [15:0] accel_x_raw;
-    logic [15:0] accel_y_raw;
-    logic [15:0] accel_z_raw;
-    logic [15:0] gyro_x_raw;
-    logic [15:0] gyro_y_raw;
-    logic [15:0] gyro_z_raw;
-    logic        imu_valid;
-    logic        imu_error;
+    // 4. SPI Master Sensor Stream (Signed 16-bit 2's complement words)
+    logic signed [15:0] accel_x_raw, accel_y_raw, accel_z_raw;
+    logic signed [15:0] gyro_x_raw,  gyro_y_raw,  gyro_z_raw;
+    logic               imu_valid;
+    logic               imu_error;
 
     // 5. Attitude Estimator Outputs (Q8.8 Fixed-Point Format)
     logic signed [15:0] est_roll_angle;
@@ -54,10 +50,7 @@ module flight_core #(
     logic signed [15:0] pid_yaw_corr;
 
     // 8. Motor Mixer Commands
-    logic [14:0] motor_1_cmd;
-    logic [14:0] motor_2_cmd;
-    logic [14:0] motor_3_cmd;
-    logic [14:0] motor_4_cmd;
+    logic [14:0] motor_cmd [4];
 
     // --- Control Loop Gains (Q8.8 Fixed-Point Format) ---
     // Outer Angle Loop Gain: Converts Angle Error (deg) to Desired Angular Rate (deg/s)
@@ -144,12 +137,12 @@ module flight_core #(
         .clk(clk),
         .rst_n(rst_n),
         .enable(imu_valid),
-        .accel_x($signed(accel_x_raw)),
-        .accel_y($signed(accel_y_raw)),
-        .accel_z($signed(accel_z_raw)),
-        .gyro_x($signed(gyro_x_raw)),
-        .gyro_y($signed(gyro_y_raw)),
-        .gyro_z($signed(gyro_z_raw)),
+        .accel_x(accel_x_raw),
+        .accel_y(accel_y_raw),
+        .accel_z(accel_z_raw),
+        .gyro_x(gyro_x_raw),
+        .gyro_y(gyro_y_raw),
+        .gyro_z(gyro_z_raw),
         .roll_angle(est_roll_angle),
         .pitch_angle(est_pitch_angle)
     );
@@ -157,7 +150,6 @@ module flight_core #(
     // =========================================================================
     // 6. Cascaded Outer-Loop Angle P-Controllers (Self-Leveling)
     // =========================================================================
-    // Roll Angle Outer Loop -> outputs desired roll rate
     pid_calculator pid_angle_roll (
         .clk(clk),
         .rst_n(rst_n),
@@ -171,7 +163,6 @@ module flight_core #(
         .pid_correction(desired_roll_rate)
     );
 
-    // Pitch Angle Outer Loop -> outputs desired pitch rate
     pid_calculator pid_angle_pitch (
         .clk(clk),
         .rst_n(rst_n),
@@ -194,7 +185,7 @@ module flight_core #(
         .enable(imu_valid),
         .clear_i(idle_throttle_active),
         .target_val(desired_roll_rate),
-        .actual_val($signed(gyro_x_raw)),
+        .actual_val(gyro_x_raw),
         .p_gain(P_GAIN_RATE),
         .i_gain(I_GAIN_RATE),
         .d_gain(D_GAIN_RATE),
@@ -207,7 +198,7 @@ module flight_core #(
         .enable(imu_valid),
         .clear_i(idle_throttle_active),
         .target_val(desired_pitch_rate),
-        .actual_val($signed(gyro_y_raw)),
+        .actual_val(gyro_y_raw),
         .p_gain(P_GAIN_RATE),
         .i_gain(I_GAIN_RATE),
         .d_gain(D_GAIN_RATE),
@@ -220,7 +211,7 @@ module flight_core #(
         .enable(imu_valid),
         .clear_i(idle_throttle_active),
         .target_val(target_yaw_rate),
-        .actual_val($signed(gyro_z_raw)),
+        .actual_val(gyro_z_raw),
         .p_gain(P_GAIN_RATE),
         .i_gain(I_GAIN_RATE),
         .d_gain(D_GAIN_RATE),
@@ -238,41 +229,25 @@ module flight_core #(
         .roll_correction(pid_roll_corr),
         .pitch_correction(pid_pitch_corr),
         .yaw_correction(pid_yaw_corr),
-        .motor_1(motor_1_cmd),
-        .motor_2(motor_2_cmd),
-        .motor_3(motor_3_cmd),
-        .motor_4(motor_4_cmd)
+        .motor_1(motor_cmd[0]),
+        .motor_2(motor_cmd[1]),
+        .motor_3(motor_cmd[2]),
+        .motor_4(motor_cmd[3])
     );
 
     // =========================================================================
     // 9. ESC PWM Generators (400 Hz, Double-Buffered)
     // =========================================================================
-    pwm_generator esc_pwm_1 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .duty_cycle(motor_1_cmd),
-        .pwm_out(esc_pwm_outputs[0])
-    );
-    
-    pwm_generator esc_pwm_2 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .duty_cycle(motor_2_cmd),
-        .pwm_out(esc_pwm_outputs[1])
-    );
-    
-    pwm_generator esc_pwm_3 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .duty_cycle(motor_3_cmd),
-        .pwm_out(esc_pwm_outputs[2])
-    );
-    
-    pwm_generator esc_pwm_4 (
-        .clk(clk),
-        .rst_n(rst_n),
-        .duty_cycle(motor_4_cmd),
-        .pwm_out(esc_pwm_outputs[3])
-    );
+    generate
+        for (genvar m = 0; m < 4; m++) begin : gen_esc_pwm
+            pwm_generator esc_pwm_inst (
+                .clk(clk),
+                .rst_n(rst_n),
+                .duty_cycle(motor_cmd[m]),
+                .pwm_out(esc_pwm_outputs[m])
+            );
+        end
+    endgenerate
 
 endmodule
+

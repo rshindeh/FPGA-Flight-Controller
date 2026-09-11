@@ -19,66 +19,66 @@ module pid_calculator (
     output logic signed [15:0] pid_correction
 );
 
-    // --- Internal State Registers ---
-    logic signed [15:0] current_error;
-    logic signed [15:0] prev_error;
-    logic signed [15:0] derivative_error;
-    logic signed [31:0] integral_error; // 32-bit register for cumulative error
-
-    // Error Calculation
-    assign current_error = target_val - actual_val;
-    assign derivative_error = current_error - prev_error;
-
-    // Integral Accumulator with Anti-Windup Limits
-    // Clamped to 16-bit signed limits to prevent integral runaway and 32-bit math overflow later
+    // Anti-windup and 16-bit signed saturation limits
     localparam logic signed [31:0] INT_MAX = 32'sd32767;
     localparam logic signed [31:0] INT_MIN = -32'sd32768;
 
+    // --- Internal State Registers (hierarchical probes in TB) ---
+    logic signed [15:0] current_error;
+    logic signed [15:0] prev_error;
+    logic signed [15:0] derivative_error;
+    logic signed [31:0] integral_error;
+
+    // Error Differentials
+    assign current_error    = target_val - actual_val;
+    assign derivative_error = current_error - prev_error;
+
+    // Candidate Integral Accumulator
+    logic signed [31:0] next_integral;
+    assign next_integral = integral_error + current_error;
+
+    // Synchronous State Pipeline
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             prev_error     <= 16'sd0;
             integral_error <= 32'sd0;
-        end else if (clear_i) begin
-            integral_error <= 32'sd0;
+        end else begin
+            // Error memory tracks input error whenever new sample strobe arrives
             if (enable) begin
                 prev_error <= current_error;
             end
-        end else if (enable) begin
-            prev_error <= current_error;
-            
-            // Accumulate with Anti-Windup Clamping
-            if (integral_error + current_error > INT_MAX) begin
-                integral_error <= INT_MAX;
-            end else if (integral_error + current_error < INT_MIN) begin
-                integral_error <= INT_MIN;
-            end else begin
-                integral_error <= integral_error + current_error;
+
+            // Integral accumulator with anti-windup clamping
+            if (clear_i) begin
+                integral_error <= 32'sd0;
+            end else if (enable) begin
+                if (next_integral > INT_MAX) begin
+                    integral_error <= INT_MAX;
+                end else if (next_integral < INT_MIN) begin
+                    integral_error <= INT_MIN;
+                end else begin
+                    integral_error <= next_integral;
+                end
             end
         end
     end
 
     // --- Multiplier & Accumulation Datapath (32-bit arithmetic) ---
-    // Multiplying Q8.8 by Q8.8 yields a Q16.16 formatted result inside a 32-bit signed register
-    logic signed [31:0] p_term_raw;
-    logic signed [31:0] i_term_raw;
-    logic signed [31:0] d_term_raw;
+    // Q8.8 * Q8.8 yields Q16.16 formatted terms
+    logic signed [31:0] p_term;
+    logic signed [31:0] i_term;
+    logic signed [31:0] d_term;
     logic signed [31:0] total_correction_raw;
-
-    assign p_term_raw = $signed(current_error) * $signed(p_gain);
-    // Since integral_error is clamped to INT_MAX/MIN, this multiplication fits safely in 32-bits
-    assign i_term_raw = integral_error * $signed(i_gain); 
-    assign d_term_raw = $signed(derivative_error) * $signed(d_gain);
-
-    // Accumulate the Q16.16 terms
-    assign total_correction_raw = p_term_raw + i_term_raw + d_term_raw;
-
-    // --- Scaling and Output Saturation ---
-    // Scale Q16.16 back down to Q24.8 by performing an arithmetic right shift by 8
     logic signed [31:0] total_correction_scaled;
-    assign total_correction_scaled = total_correction_raw >>> 8;
 
-    // Saturation clamping before truncating back to the 16-bit Q8.8 output format
-    // This prevents catastrophic wrapping if the correction exceeds 16-bit limits
+    assign p_term = current_error * p_gain;
+    assign i_term = integral_error * i_gain;
+    assign d_term = derivative_error * d_gain;
+
+    assign total_correction_raw    = p_term + i_term + d_term;
+    assign total_correction_scaled = total_correction_raw >>> 8; // Downscale Q16.16 to Q24.8
+
+    // Saturation clamping before truncating to 16-bit Q8.8 output format
     always_comb begin
         if (total_correction_scaled > INT_MAX) begin
             pid_correction = 16'sd32767;
@@ -90,3 +90,4 @@ module pid_calculator (
     end
 
 endmodule
+

@@ -1,8 +1,8 @@
 `timescale 1ns / 1ps
 
 module motor_mixer (
-    input  logic               clk,
-    input  logic               rst_n,
+    input  logic               clk,             // System Clock (reserved for future filtering)
+    input  logic               rst_n,           // Active-Low Reset (reserved for future filtering)
     input  logic               armed,           // Arming status flag (1 = Active, 0 = Disarmed)
     
     // Core Throttle Command (15-bit Unsigned, 12000 to 24000 ticks)
@@ -20,60 +20,50 @@ module motor_mixer (
     output logic [14:0]        motor_4  // Front Left  (CW)
 );
 
-    // --- Intermediate Calculation Wires ---
-    // Expanded to 32-bit signed to guarantee no intermediate arithmetic overflow/underflow wrapping
+    // Standard ESC Pulse Bounds: 1.0 ms (12,000 ticks) to 2.0 ms (24,000 ticks)
+    localparam logic signed [31:0] ESC_MIN_TICKS = 32'sd12000;
+    localparam logic signed [31:0] ESC_MAX_TICKS = 32'sd24000;
+
+    // ESC Saturation Clamping Helper Function
+    function automatic logic [14:0] clamp_esc(input logic signed [31:0] calc_val);
+        if (calc_val > ESC_MAX_TICKS)      return 15'd24000;
+        else if (calc_val < ESC_MIN_TICKS) return 15'd12000;
+        else                               return calc_val[14:0];
+    endfunction
+
+    // Zero-extend throttle to 32-bit signed for safe multi-operand arithmetic
+    logic signed [31:0] throttle_signed;
+    assign throttle_signed = $signed({17'b0, throttle_in});
+
+    // Quad-X Mixing Matrix: 32-bit signed intermediate sums prevent overflow
+    // Motor 1 (Front Right CCW): Throttle - Roll - Pitch + Yaw
+    // Motor 2 (Rear Right CW)  : Throttle - Roll + Pitch - Yaw
+    // Motor 3 (Rear Left CCW)  : Throttle + Roll + Pitch + Yaw
+    // Motor 4 (Front Left CW)  : Throttle + Roll - Pitch - Yaw
     logic signed [31:0] m1_calc;
     logic signed [31:0] m2_calc;
     logic signed [31:0] m3_calc;
     logic signed [31:0] m4_calc;
 
-    // --- Standard Quad-X Mixing Matrix ---
-    // Motor 1 (Front Right):  Throttle - Roll - Pitch + Yaw
-    // Motor 2 (Rear Right) :  Throttle - Roll + Pitch - Yaw
-    // Motor 3 (Rear Left)  :  Throttle + Roll + Pitch + Yaw
-    // Motor 4 (Front Left) :  Throttle + Roll - Pitch - Yaw
-    
-    // Note: throttle_in is 15-bit unsigned, zero-extended and cast to signed 32-bit for safe addition
-    always_comb begin
-        m1_calc = $signed({17'b0, throttle_in}) - roll_correction - pitch_correction + yaw_correction;
-        m2_calc = $signed({17'b0, throttle_in}) - roll_correction + pitch_correction - yaw_correction;
-        m3_calc = $signed({17'b0, throttle_in}) + roll_correction + pitch_correction + yaw_correction;
-        m4_calc = $signed({17'b0, throttle_in}) + roll_correction - pitch_correction - yaw_correction;
-    end
+    assign m1_calc = throttle_signed - roll_correction - pitch_correction + yaw_correction;
+    assign m2_calc = throttle_signed - roll_correction + pitch_correction - yaw_correction;
+    assign m3_calc = throttle_signed + roll_correction + pitch_correction + yaw_correction;
+    assign m4_calc = throttle_signed + roll_correction - pitch_correction - yaw_correction;
 
-    // --- Combinatorial Saturation Clamping ---
-    // Standard ESC bounds: 1000 us (12,000 ticks) to 2000 us (24,000 ticks)
-    localparam logic signed [31:0] LIMIT_MAX = 32'sd24000;
-    localparam logic signed [31:0] LIMIT_MIN = 32'sd12000;
-
+    // Output Clamping & Arming Interlock
     always_comb begin
         if (!armed) begin
-            // Failsafe Disarmed: Lock all outputs to 1.0 ms (zero throttle)
             motor_1 = 15'd12000;
             motor_2 = 15'd12000;
             motor_3 = 15'd12000;
             motor_4 = 15'd12000;
         end else begin
-            // Motor 1 Saturation
-            if (m1_calc > LIMIT_MAX)      motor_1 = 15'd24000;
-            else if (m1_calc < LIMIT_MIN) motor_1 = 15'd12000;
-            else                          motor_1 = m1_calc[14:0];
-
-            // Motor 2 Saturation
-            if (m2_calc > LIMIT_MAX)      motor_2 = 15'd24000;
-            else if (m2_calc < LIMIT_MIN) motor_2 = 15'd12000;
-            else                          motor_2 = m2_calc[14:0];
-
-            // Motor 3 Saturation
-            if (m3_calc > LIMIT_MAX)      motor_3 = 15'd24000;
-            else if (m3_calc < LIMIT_MIN) motor_3 = 15'd12000;
-            else                          motor_3 = m3_calc[14:0];
-
-            // Motor 4 Saturation
-            if (m4_calc > LIMIT_MAX)      motor_4 = 15'd24000;
-            else if (m4_calc < LIMIT_MIN) motor_4 = 15'd12000;
-            else                          motor_4 = m4_calc[14:0];
+            motor_1 = clamp_esc(m1_calc);
+            motor_2 = clamp_esc(m2_calc);
+            motor_3 = clamp_esc(m3_calc);
+            motor_4 = clamp_esc(m4_calc);
         end
     end
 
 endmodule
+
