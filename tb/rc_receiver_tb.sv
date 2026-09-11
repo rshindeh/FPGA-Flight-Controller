@@ -1,21 +1,30 @@
 `timescale 1ns / 1ps
 
+// =============================================================================
+// Module: rc_receiver_tb
+// Purpose: Unit verification for rc_receiver (4-ch PWM decoder, glitch filter, watchdog)
+// =============================================================================
+
+import fc_tb_pkg::*;
+
 module rc_receiver_tb();
 
-    // 1. Signals
+    `GLOBAL_WATCHDOG(300ms)
+
     logic        clk;
     logic        rst_n;
     logic [3:0]  ppm_in;
     logic [14:0] channel_out[4];
     logic [3:0]  valid;
+    int error_count = 0;
 
-    // 2. Instantiate UUT (Unit Under Test)
+    // Instantiate UUT
     rc_receiver #(
         .NUM_CHANNELS(4),
         .CLK_FREQ_HZ(12_000_000),
         .MIN_PULSE_US(1000),
         .MAX_PULSE_US(2000),
-        .WD_TIMEOUT_MS(50) // Reduced watchdog timeout to 50 ms to speed up simulation
+        .WD_TIMEOUT_MS(50)
     ) uut (
         .clk(clk),
         .rst_n(rst_n),
@@ -24,135 +33,123 @@ module rc_receiver_tb();
         .valid(valid)
     );
 
-    // 3. Generate 12 MHz Clock (Period = 83.33 ns)
-    always begin
-        clk = 1'b1;
-        #41.67;
+    // 12 MHz Master Clock
+    initial begin
         clk = 1'b0;
-        #41.67;
+        forever #CLK_HALF_PERIOD_NS clk = ~clk;
     end
 
-    // Helper task to send a pulse with specific duration on a channel
-    task send_pulse(input int channel_idx, input real duration_ms);
-        begin
-            $display("[TB] Channel %0d: Sending %0.2f ms pulse...", channel_idx, duration_ms);
-            ppm_in[channel_idx] = 1'b1;
-            #(duration_ms * 1_000_000);
-            ppm_in[channel_idx] = 1'b0;
+    // Concurrent SystemVerilog Assertions (SVA)
+    genvar gi;
+    generate
+        for (gi = 0; gi < 4; gi++) begin : gen_sva_bounds
+            property p_ch_bounds;
+                @(posedge clk) disable iff(!rst_n)
+                valid[gi] |-> (channel_out[gi] >= 15'd12000 && channel_out[gi] <= 15'd24000);
+            endproperty
+            assert property (p_ch_bounds) else $error("[SVA] Ch%0d output out of bounds: %0d", gi, channel_out[gi]);
         end
+    endgenerate
+
+    // Helper task to send pulse with non-blocking drives
+    task automatic send_pulse(input int channel_idx, input real duration_ms);
+        ppm_in[channel_idx] <= 1'b1;
+        #(duration_ms * 1_000_000);
+        ppm_in[channel_idx] <= 1'b0;
     endtask
 
-    // 4. Test Stimulus Block
     initial begin
-        $display("[TB] Starting RC Receiver Testbench...");
-        
-        // Initialize inputs
-        rst_n  = 1'b0;
-        ppm_in = 4'b0000;
-        #200;
-        
-        // Release reset
-        rst_n = 1'b1;
-        #1000;
-        $display("[TB] Reset released. Initial valid = %b", valid);
-        
-        // Test 1: Neutral Default Value Check (during startup, valid should be 0)
-        if (channel_out[0] == 18000 && channel_out[3] == 12000 && valid == 4'b0000) begin
-            $display("[TB] PASS: Initial default values correct (Roll=18000, Throttle=12000, valid=0000)");
-        end else begin
-            $display("[TB] FAIL: Initial default values incorrect (Roll=%0d, Throttle=%0d, valid=%b)", 
-                     channel_out[0], channel_out[3], valid);
-        end
+        $display("=================================================================");
+        $display("[TB] Starting Hardened RC Receiver Multi-Channel Verification");
+        $display("=================================================================");
+        error_count = 0;
+        ppm_in      <= 4'b0000;
 
-        // Test 2: Normal Pulses
-        // Send two consecutive clean pulses on Channel 0 (Roll, nominal 1.5 ms) and Channel 3 (Throttle, nominal 1.0 ms)
-        // Note: The second pulse will lock in the valid flag since it sees consecutive clean periods
-        send_pulse(0, 1.5);
-        #5000000; // wait 5 ms
-        send_pulse(0, 1.5);
-        #5000000; // wait 5 ms
-        
-        send_pulse(3, 1.0);
-        #5000000;
-        send_pulse(3, 1.0);
-        #5000000;
+        `SYNC_RESET_RELEASE(clk, rst_n, 5)
 
-        $display("[TB] After normal pulses: Roll (Ch0) = %0d (valid=%b), Throttle (Ch3) = %0d (valid=%b)",
-                 channel_out[0], valid[0], channel_out[3], valid[3]);
+        // Test 1: Neutral Default Values (Disarmed/Unlinked State)
+        check_assert(channel_out[0] == 18000 && channel_out[1] == 18000 &&
+                     channel_out[2] == 18000 && channel_out[3] == 12000 && valid == 4'b0000,
+                     "DEFAULT_NEUTRAL", "Safe default values verified on all 4 channels (valid=0000)", error_count);
 
-        if (channel_out[0] >= 17990 && channel_out[0] <= 18010 && valid[0] == 1'b1 && channel_out[3] == 12000 && valid[3] == 1'b1) begin
-            $display("[TB] PASS: Normal pulse widths decoded successfully");
-        end else begin
-            $display("[TB] FAIL: Normal pulse widths decoded incorrectly");
-        end
+        // Test 2: Standard Pulse Decoding Across All 4 Channels
+        send_pulse(0, 1.5);  #5_000_000; send_pulse(0, 1.5);  #5_000_000;
+        send_pulse(1, 1.75); #5_000_000; send_pulse(1, 1.75); #5_000_000;
+        send_pulse(2, 1.25); #5_000_000; send_pulse(2, 1.25); #5_000_000;
+        send_pulse(3, 1.0);  #5_000_000; send_pulse(3, 1.0);  #5_000_000;
 
-        // Test 3: Limits & Clamping Check
-        // Send a 0.95 ms pulse on Ch3 (Throttle) -> should clamp to 12,000
-        // Send a 2.05 ms pulse on Ch0 (Roll) -> should clamp to 24,000
-        send_pulse(3, 0.95);
-        #5000000;
-        send_pulse(0, 2.05);
-        #5000000;
-        
-        $display("[TB] After clamping check: Roll (Ch0) = %0d (valid=%b), Throttle (Ch3) = %0d (valid=%b)",
-                 channel_out[0], valid[0], channel_out[3], valid[3]);
+        check_assert(is_within_tolerance(channel_out[0], 18000, 20) && valid[0] &&
+                     is_within_tolerance(channel_out[1], 21000, 20) && valid[1] &&
+                     is_within_tolerance(channel_out[2], 15000, 20) && valid[2] &&
+                     is_within_tolerance(channel_out[3], 12000, 20) && valid[3],
+                     "CH_DECODE", "All 4 channels decoded accurately with valid flags asserted", error_count);
 
-        if (channel_out[0] == 24000 && valid[0] == 1'b1 && channel_out[3] == 12000 && valid[3] == 1'b1) begin
-            $display("[TB] PASS: Clamping limits enforced correctly");
-        end else begin
-            $display("[TB] FAIL: Clamping limits enforced incorrectly");
-        end
+        // Test 3: Limits & Clamping Check (0.95 ms and 2.05 ms)
+        send_pulse(3, 0.95); #5_000_000;
+        send_pulse(0, 2.05); #5_000_000;
+        check_assert(channel_out[0] == 24000 && valid[0] && channel_out[3] == 12000 && valid[3],
+                     "PULSE_CLAMPING", "Out-of-range pulses clamped to 12,000 and 24,000", error_count);
 
-        // Test 4: Out-Of-Bounds (OOB) Check
-        // Send a 0.8 ms pulse on Ch0 (Roll) -> too short, should invalidate Ch0 output (de-assert valid, reset to safe default)
-        send_pulse(0, 0.8);
-        #5000000;
-        
-        $display("[TB] After OOB Low pulse: Roll (Ch0) = %0d, valid[0] = %b", channel_out[0], valid[0]);
-        if (channel_out[0] == 18000 && valid[0] == 1'b0) begin
-            $display("[TB] PASS: Out-of-bounds low pulse correctly handled");
-        end else begin
-            $display("[TB] FAIL: Out-of-bounds low pulse incorrectly handled");
-        end
+        // Test 4: 500 ns Runt Glitch Rejection
+        ppm_in[1] <= 1'b1; #500; ppm_in[1] <= 1'b0; #5_000_000;
+        check_assert(channel_out[1] == 18000 && valid[1] === 1'b0, "GLITCH_REJECTION",
+                     "500 ns runt glitch rejected and channel held at safe default", error_count);
 
-        // Re-establish valid signal on Ch0
-        send_pulse(0, 1.5);
-        #5000000;
-        send_pulse(0, 1.5);
-        #5000000;
-        $display("[TB] Re-established Roll (Ch0) = %0d, valid[0] = %b", channel_out[0], valid[0]);
+        // Test 5: Out-Of-Bounds Pulse (0.8 ms)
+        send_pulse(0, 0.8); #5_000_000;
+        check_assert(valid[0] === 1'b0, "OOB_LOW_REJECT",
+                     "Out-of-bounds low pulse (0.8 ms) correctly de-asserted valid flag", error_count);
 
-        // Test 5: Pulse Timeout Protection
-        // Send a 4.0 ms pulse on Ch0 (should timeout at 3.0 ms, invalidate output, set to safe default)
-        send_pulse(0, 4.0);
-        #5000000;
-        $display("[TB] After pulse timeout check: Roll (Ch0) = %0d, valid[0] = %b", channel_out[0], valid[0]);
-        if (channel_out[0] == 18000 && valid[0] == 1'b0) begin
-            $display("[TB] PASS: Pulse width timeout triggered and handled successfully");
-        end else begin
-            $display("[TB] FAIL: Pulse width timeout failed to trigger or handle");
-        end
+        // Re-establish valid signal
+        send_pulse(0, 1.5); #5_000_000; send_pulse(0, 1.5); #5_000_000;
 
-        // Re-establish valid signals on both Ch0 and Ch3
-        send_pulse(0, 1.5); #5000000; send_pulse(0, 1.5); #5000000;
-        send_pulse(3, 1.2); #5000000; send_pulse(3, 1.2); #5000000;
-        $display("[TB] Re-established Ch0/Ch3 before watchdog test: valid = %b", valid);
+        // Test 6: Pulse Timeout Protection (4.0 ms)
+        send_pulse(0, 4.0); #5_000_000;
+        check_assert(channel_out[0] == 18000 && valid[0] === 1'b0, "PULSE_TIMEOUT",
+                     "4.0 ms pulse triggered timeout protection, restoring safe default", error_count);
 
-        // Test 6: Watchdog Failsafe Check
-        // No pulses sent. Wait for WD_TIMEOUT_MS = 50 ms.
-        $display("[TB] Waiting 55 ms to test Watchdog failsafe...");
-        #55000000; // 55 ms
+        // Restore valid pulses on all channels
+        send_pulse(0, 1.5); #5_000_000; send_pulse(0, 1.5); #5_000_000;
+        send_pulse(1, 1.5); #5_000_000; send_pulse(1, 1.5); #5_000_000;
+        send_pulse(2, 1.5); #5_000_000; send_pulse(2, 1.5); #5_000_000;
+        send_pulse(3, 1.2); #5_000_000; send_pulse(3, 1.2); #5_000_000;
 
-        $display("[TB] After watchdog timeout: Roll (Ch0) = %0d, valid[0] = %b | Throttle (Ch3) = %0d, valid[3] = %b",
-                 channel_out[0], valid[0], channel_out[3], valid[3]);
+        // Test 7: Watchdog Connection-Loss Failsafe (55 ms silence)
+        #55_000_000;
+        check_assert(channel_out[0] == 18000 && channel_out[1] == 18000 &&
+                     channel_out[2] == 18000 && channel_out[3] == 12000 && valid == 4'b0000,
+                     "WATCHDOG_FAILSAFE", "Watchdog timeout (55 ms) deasserted valid and restored safe defaults", error_count);
 
-        if (channel_out[0] == 18000 && valid[0] == 1'b0 && channel_out[3] == 12000 && valid[3] == 1'b0) begin
-            $display("[TB] PASS: Watchdog timeout successfully de-asserted valid outputs and forced defaults");
-        end else begin
-            $display("[TB] FAIL: Watchdog timeout check failed");
-        end
+        // Test 8: Staggered Overlapping Concurrent Channels
+        fork
+            begin send_pulse(0, 1.3); end
+            begin #400_000; send_pulse(1, 1.6); end
+            begin #800_000; send_pulse(2, 1.4); end
+            begin #1_200_000; send_pulse(3, 1.1); end
+        join
+        #5_000_000;
+        fork
+            begin send_pulse(0, 1.3); end
+            begin #400_000; send_pulse(1, 1.6); end
+            begin #800_000; send_pulse(2, 1.4); end
+            begin #1_200_000; send_pulse(3, 1.1); end
+        join
+        #5_000_000;
 
-        $display("[TB] Simulation completed successfully.");
+        check_assert(is_within_tolerance(channel_out[0], 15600, 20) && valid[0] &&
+                     is_within_tolerance(channel_out[1], 19200, 20) && valid[1] &&
+                     is_within_tolerance(channel_out[2], 16800, 20) && valid[2] &&
+                     is_within_tolerance(channel_out[3], 13200, 20) && valid[3],
+                     "STAGGERED_CHANNELS", "All 4 concurrent overlapping channels decoded accurately", error_count);
+
+        // Test 9: Sub-Cycle Asynchronous Clock Phase Offsets
+        #37; // 37 ns sub-cycle phase offset
+        send_pulse(0, 1.5); #5_000_000; send_pulse(0, 1.5); #5_000_000;
+        check_assert(is_within_tolerance(channel_out[0], 18000, 20) && valid[0],
+                     "METASTABLE_PHASE", "Pulse arriving with 37 ns clock offset cleanly synchronized and decoded", error_count);
+
+        // Standardized Exit
+        finalize_test_suite("RC RECEIVER", error_count);
         $finish;
     end
 

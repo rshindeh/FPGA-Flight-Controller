@@ -1,14 +1,23 @@
 `timescale 1ns / 1ps
 
+// =============================================================================
+// Module: pwm_generator_tb
+// Purpose: Unit verification for pwm_generator (400 Hz ESC driver, double-buffering)
+// =============================================================================
+
+import fc_tb_pkg::*;
+
 module pwm_generator_tb();
 
-    // 1. Signals
+    `GLOBAL_WATCHDOG(60ms)
+
     logic        clk;
     logic        rst_n;
     logic [14:0] duty_cycle;
     logic        pwm_out;
+    int          error_count = 0;
 
-    // 2. Instantiate UUT
+    // Instantiate UUT
     pwm_generator uut (
         .clk(clk),
         .rst_n(rst_n),
@@ -16,12 +25,10 @@ module pwm_generator_tb();
         .pwm_out(pwm_out)
     );
 
-    // 3. Generate 12 MHz Clock (Period = 83.333 ns, toggle every 41.667 ns)
-    always begin
-        clk = 1'b1;
-        #41.667;
+    // 12 MHz Master Clock (Period = 83.333 ns)
+    initial begin
         clk = 1'b0;
-        #41.667;
+        forever #CLK_HALF_PERIOD_NS clk = ~clk;
     end
 
     // Realtime measurement variables
@@ -29,16 +36,10 @@ module pwm_generator_tb();
     realtime falling_edge_time;
     realtime period;
     realtime high_time;
-    realtime frequency;
-    realtime duty_cycle_pct;
 
     always @(posedge pwm_out) begin
         if (rising_edge_time != 0) begin
             period = $realtime - rising_edge_time;
-            frequency = 1.0e9 / period;
-            duty_cycle_pct = (high_time / period) * 100.0;
-            $display("[MONITOR] Time = %0.1f ns | Period = %0.2f ns, Freq = %0.2f Hz, Duty Cycle = %0.2f%%", 
-                     $realtime, period, frequency, duty_cycle_pct);
         end
         rising_edge_time = $realtime;
     end
@@ -50,88 +51,77 @@ module pwm_generator_tb();
         end
     end
 
-    // 4. Test Stimulus Block
     initial begin
-        $display("[TB] Starting PWM Generator Verification...");
+        $display("=================================================================");
+        $display("[TB] Starting Hardened PWM Generator Verification Suite");
+        $display("=================================================================");
+        error_count      = 0;
         rising_edge_time = 0;
         falling_edge_time = 0;
-        high_time = 0;
-        period = 0;
+        high_time        = 0;
+        period           = 0;
 
-        // Initialize Signals
-        rst_n = 1'b0;
-        duty_cycle = 15'd0;
-        #100;
-        rst_n = 1'b1;
-        #100;
+        // Synchronous Reset
+        duty_cycle <= 15'd0;
+        `SYNC_RESET_RELEASE(clk, rst_n, 5)
 
-        // ========================================================
-        // TEST CASE 1: 10% Throttle (3,000 / 30,000 ticks = 0.25 ms high time)
-        // ========================================================
-        $display("[TB] --- Test Case 1: Set 10%% Throttle (3,000 ticks) ---");
-        duty_cycle = 15'd3000;
-        
-        // Wait for 2 full periods (5 ms)
-        #5000000;
-        
-        if (period >= 2490000 && period <= 2510000 && high_time >= 249000 && high_time <= 251000) begin
-            $display("[TB] PASS: 10%% Duty Cycle verified (Period ~2.5ms, High ~0.25ms).");
-        end else begin
-            $display("[TB] FAIL: 10%% Duty Cycle mismatched! Period = %0.1f ns, High = %0.1f ns", period, high_time);
-        end
+        // Test 1: 10% Throttle (3,000 / 30,000 ticks = 0.25 ms high time)
+        duty_cycle <= 15'd3000;
+        #5_000_000; // 2 frames (5 ms)
+        check_assert(is_within_tolerance_real(period, 2_500_000.0, 10_000.0) &&
+                     is_within_tolerance_real(high_time, 250_000.0, 5_000.0),
+                     "DUTY_10_PCT", "10% Duty Cycle verified (Period ~2.5ms, High ~0.25ms)", error_count);
 
-        // ========================================================
-        // TEST CASE 2: 50% Throttle (15,000 / 30,000 ticks = 1.25 ms high time)
-        // ========================================================
-        $display("[TB] --- Test Case 2: Set 50%% Throttle (15,000 ticks) ---");
-        duty_cycle = 15'd15000;
-        
-        // Wait for 2 full periods (5 ms)
-        #5000000;
-        
-        if (period >= 2490000 && period <= 2510000 && high_time >= 1240000 && high_time <= 1260000) begin
-            $display("[TB] PASS: 50%% Duty Cycle verified (Period ~2.5ms, High ~1.25ms).");
-        end else begin
-            $display("[TB] FAIL: 50%% Duty Cycle mismatched! Period = %0.1f ns, High = %0.1f ns", period, high_time);
-        end
+        // Test 2: 50% Throttle (15,000 / 30,000 ticks = 1.25 ms high time)
+        duty_cycle <= 15'd15000;
+        #5_000_000;
+        check_assert(is_within_tolerance_real(period, 2_500_000.0, 10_000.0) &&
+                     is_within_tolerance_real(high_time, 1_250_000.0, 10_000.0),
+                     "DUTY_50_PCT", "50% Duty Cycle verified (Period ~2.5ms, High ~1.25ms)", error_count);
 
-        // ========================================================
-        // TEST CASE 3: Double-Buffering & Glitch Elimination Check
-        // ========================================================
-        $display("[TB] --- Test Case 3: Double-Buffering Shadow Register Check ---");
-        // Wait for a new rising edge (start of frame)
+        // Test 3: Shadow Register Double-Buffering & Glitch Elimination
         @(posedge pwm_out);
-        // Wait 0.5 ms into the pulse (while counter is ~6,000 ticks, well before the 15,000 tick end)
-        #500000;
-        // Now abruptly drop duty_cycle to 3,000 (which is less than current counter ~6,000)
-        duty_cycle = 15'd3000;
-        $display("[TB] Changed duty_cycle input to 3000 mid-pulse at %0.1f ns (pwm_out is %b)", $realtime, pwm_out);
-        
-        // If double buffering works, pwm_out MUST remain high until 15,000 ticks (1.25 ms from rising edge)
-        #500000; // 1.0 ms from rising edge
-        if (pwm_out === 1'b1) begin
-            $display("[TB] PASS: pwm_out stayed HIGH at 1.0 ms despite duty_cycle input dropping below current counter!");
-        end else begin
-            $display("[TB] FAIL: Mid-frame glitch detected! pwm_out dropped prematurely.");
-        end
+        #500_000; // 0.5 ms into the pulse (counter ~6,000, before 15,000 end)
+        duty_cycle <= 15'd3000; // lower duty cycle mid-pulse
+        #500_000; // 1.0 ms from start: pwm_out must remain high
+        check_assert(pwm_out === 1'b1, "SHADOW_NO_GLITCH", "pwm_out stayed HIGH mid-pulse despite input drop", error_count);
 
-        // Wait for falling edge
         @(negedge pwm_out);
-        if (high_time >= 1240000 && high_time <= 1260000) begin
-            $display("[TB] PASS: Current frame completed full 1.25ms pulse before loading new duty cycle.");
-        end else begin
-            $display("[TB] FAIL: Frame high time was truncated to %0.1f ns", high_time);
-        end
+        check_assert(is_within_tolerance_real(high_time, 1_250_000.0, 10_000.0),
+                     "SHADOW_FRAME_COMPLETE", "Current frame completed full 1.25ms pulse before latching", error_count);
 
-        // Wait for next frame to verify that the new 10% duty cycle (3,000 ticks) is now active
         @(negedge pwm_out);
-        if (high_time >= 249000 && high_time <= 251000) begin
-            $display("[TB] PASS: Next frame cleanly adopted new 10%% (0.25ms) duty cycle at frame boundary.");
-        end else begin
-            $display("[TB] FAIL: Next frame high time incorrect: %0.1f ns", high_time);
-        end
+        check_assert(is_within_tolerance_real(high_time, 250_000.0, 5_000.0),
+                     "SHADOW_NEXT_FRAME", "Next frame adopted new 10% duty cycle cleanly at boundary", error_count);
 
-        $display("[TB] PWM Generator Verification completed successfully.");
+        // Test 4: Zero Duty Cycle (0 ticks, strictly LOW)
+        duty_cycle <= 15'd0;
+        #5_000_000;
+        check_assert(pwm_out === 1'b0, "ZERO_DUTY_CYCLE", "0% duty cycle holds pwm_out strictly LOW without glitch", error_count);
+
+        // Test 5: 100% Duty Cycle (30,000 ticks, continuously HIGH)
+        duty_cycle <= 15'd30000;
+        #5_000_000;
+        check_assert(pwm_out === 1'b1, "FULL_DUTY_CYCLE", "100% duty cycle holds pwm_out continuously HIGH", error_count);
+
+        // Test 6: Out-of-Bounds Input Protection (32,767 ticks)
+        duty_cycle <= 15'd32767;
+        #5_000_000;
+        check_assert(uut.counter < 15'd30000 && pwm_out === 1'b1,
+                     "OOB_INPUT_PROTECT", "Counter rolls over cleanly at 30,000 during out-of-bounds input", error_count);
+
+        // Test 7: Asynchronous Reset Mid-Pulse
+        duty_cycle <= 15'd15000;
+        @(posedge pwm_out);
+        #500_000;
+        rst_n <= 1'b0;
+        #20;
+        check_assert(pwm_out === 1'b0 && uut.counter == 15'd0 && uut.duty_cycle_buf == 15'd0,
+                     "ASYNC_RESET_MIDPULSE", "Asynchronous reset immediately silenced pwm_out and zeroed registers", error_count);
+        rst_n <= 1'b1;
+
+        // Standardized Exit
+        finalize_test_suite("PWM GENERATOR", error_count);
         $finish;
     end
 

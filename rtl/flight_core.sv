@@ -1,12 +1,15 @@
 `timescale 1ns / 1ps
 
 module flight_core #(
-    parameter int ARM_TIME_CYCLES = 12_000_000 // 1.0s at 12MHz (override in TB for faster simulation)
+    parameter int ARM_TIME_CYCLES  = 12_000_000, // 1.0s at 12MHz (override in TB for faster simulation)
+    parameter int INIT_WAIT_CYCLES = 120_000     // 10ms at 12MHz for MPU-6500 stabilization
 )(
     input  logic       clk,             // 12 MHz System Clock
     input  logic       rst_n,           // Active-Low Synchronized Reset
-    inout  wire        i2c_sda_io,      // I2C Serial Data Line
-    inout  wire        i2c_scl,         // I2C Serial Clock Line
+    output logic       spi_sclk,        // SPI Serial Clock (Mode 0: idles low)
+    output logic       spi_mosi,        // SPI Master Out Slave In
+    input  logic       spi_miso,        // SPI Master In Slave Out
+    output logic       spi_cs_n,        // SPI Active-Low Chip Select
     input  logic [3:0] rc_inputs,       // Asynchronous PWM inputs from radio receiver
     output logic [3:0] esc_pwm_outputs  // PWM signals to the 4 ESCs
 );
@@ -27,7 +30,7 @@ module flight_core #(
     logic armed;
     logic idle_throttle_active;
 
-    // 4. I2C Master 14-Byte Stream
+    // 4. SPI Master 14-Byte Stream
     logic [15:0] accel_x_raw;
     logic [15:0] accel_y_raw;
     logic [15:0] accel_z_raw;
@@ -111,13 +114,19 @@ module flight_core #(
     );
 
     // =========================================================================
-    // 4. I2C Master Instance (14-Byte Continuous IMU Stream)
+    // 4. SPI Master Instance (MPU-6500 14-Byte Continuous IMU Stream)
     // =========================================================================
-    i2c_master i2c_master_inst (
+    spi_master #(
+        .CLK_FREQ_HZ(12_000_000),
+        .SAMPLE_RATE_HZ(1_000),
+        .INIT_WAIT_CYCLES(INIT_WAIT_CYCLES)
+    ) spi_master_inst (
         .clk(clk),
         .rst_n(rst_n),
-        .scl(i2c_scl),
-        .sda(i2c_sda_io),
+        .spi_sclk(spi_sclk),
+        .spi_mosi(spi_mosi),
+        .spi_miso(spi_miso),
+        .spi_cs_n(spi_cs_n),
         .accel_x(accel_x_raw),
         .accel_y(accel_y_raw),
         .accel_z(accel_z_raw),

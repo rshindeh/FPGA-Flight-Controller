@@ -1,8 +1,16 @@
 `timescale 1ns / 1ps
 
+// =============================================================================
+// Module: motor_mixer_tb
+// Purpose: Unit verification for motor_mixer (Quad-X mixing matrix & ESC bounds)
+// =============================================================================
+
+import fc_tb_pkg::*;
+
 module motor_mixer_tb();
 
-    // 1. Testbench Signals
+    `GLOBAL_WATCHDOG(10ms)
+
     logic        clk;
     logic        rst_n;
     logic        armed;
@@ -15,8 +23,9 @@ module motor_mixer_tb();
     logic [14:0] motor_2;
     logic [14:0] motor_3;
     logic [14:0] motor_4;
+    int error_count = 0;
 
-    // 2. Instantiate UUT (Unit Under Test)
+    // Instantiate UUT
     motor_mixer uut (
         .clk(clk),
         .rst_n(rst_n),
@@ -31,104 +40,125 @@ module motor_mixer_tb();
         .motor_4(motor_4)
     );
 
-    // Clock Generator
-    always begin
-        clk = 1'b1;
-        #5;
+    // Clock Generator (50 MHz / 20 ns period for fast combinatorial evaluation)
+    initial begin
         clk = 1'b0;
-        #5;
+        forever #5 clk = ~clk;
     end
 
-    // 3. Test Stimulus Block
-    initial begin
-        $display("[TB] Starting Motor Mixer Saturation Verification...");
-        
-        // Reset sequence
-        rst_n = 1'b0;
-        armed = 1'b0;
-        throttle_in = 15'd12000;
-        roll_correction = 16'sd0;
-        pitch_correction = 16'sd0;
-        yaw_correction = 16'sd0;
-        #20;
-        rst_n = 1'b1;
-        #10;
+    // Concurrent SystemVerilog Assertions (SVA)
+    property p_esc_limits;
+        @(posedge clk) disable iff(!rst_n)
+        (motor_1 >= 15'd12000 && motor_1 <= 15'd24000) &&
+        (motor_2 >= 15'd12000 && motor_2 <= 15'd24000) &&
+        (motor_3 >= 15'd12000 && motor_3 <= 15'd24000) &&
+        (motor_4 >= 15'd12000 && motor_4 <= 15'd24000);
+    endproperty
+    assert property (p_esc_limits) else $error("[SVA] Motor output violated [12000, 24000] bounds!");
 
-        // ==========================================
-        // TEST CASE 0: Disarmed Safety Interlock
-        // ==========================================
-        $display("[TB] --- Test Case 0: Disarmed State (armed = 0) ---");
-        throttle_in = 15'd20000;
-        roll_correction = 16'sd5000;
-        #10;
-        if (motor_1 == 15'd12000 && motor_2 == 15'd12000 && 
-            motor_3 == 15'd12000 && motor_4 == 15'd12000) begin
-            $display("[TB] PASS: Disarmed safety lock rigidly held all motor commands at 12,000 (1.0 ms).");
-        end else begin
-            $display("[TB] FAIL: Disarmed safety lock failed!");
-        end
+    property p_disarmed_lockout;
+        @(posedge clk) disable iff(!rst_n)
+        !armed |-> (motor_1 == 15'd12000 && motor_2 == 15'd12000 && motor_3 == 15'd12000 && motor_4 == 15'd12000);
+    endproperty
+    assert property (p_disarmed_lockout) else $error("[SVA] Motor output non-idle while disarmed!");
+
+    // Helper task to check all 4 motors against expected values
+    task automatic check_motors(
+        input string tc_name,
+        input logic [14:0] exp_m1, exp_m2, exp_m3, exp_m4
+    );
+        @(posedge clk); #1;
+        check_assert(motor_1 === exp_m1 && motor_2 === exp_m2 && motor_3 === exp_m3 && motor_4 === exp_m4,
+                     tc_name, $sformatf("M1=%0d, M2=%0d, M3=%0d, M4=%0d", motor_1, motor_2, motor_3, motor_4),
+                     error_count);
+    endtask
+
+    initial begin
+        $display("=================================================================");
+        $display("[TB] Starting Hardened Motor Mixer Saturation & Matrix Suite");
+        $display("=================================================================");
+        error_count      = 0;
+        armed            <= 1'b0;
+        throttle_in      <= 15'd12000;
+        roll_correction  <= 16'sd0;
+        pitch_correction <= 16'sd0;
+        yaw_correction   <= 16'sd0;
+
+        `SYNC_RESET_RELEASE(clk, rst_n, 5)
+
+        // Test 0: Disarmed Safety Interlock
+        throttle_in      <= 15'd20000;
+        roll_correction  <= 16'sd5000;
+        pitch_correction <= 16'sd3000;
+        yaw_correction   <= 16'sd2000;
+        check_motors("DISARMED_LOCKOUT", 15'd12000, 15'd12000, 15'd12000, 15'd12000);
 
         // Arm the mixer
-        armed = 1'b1;
-        #10;
+        armed <= 1'b1;
 
-        // ==========================================
-        // TEST CASE 1: Neutral Throttle & Zero Corrections
-        // ==========================================
-        $display("[TB] --- Test Case 1: Neutral hover throttle (18,000) and zero corrections ---");
-        throttle_in = 15'd18000;
-        roll_correction = 16'sd0;
-        pitch_correction = 16'sd0;
-        yaw_correction = 16'sd0;
-        #10;
-        
-        $display("[TB] Inputs: Throttle = %0d, Roll = %0d, Pitch = %0d, Yaw = %0d", 
-                 throttle_in, roll_correction, pitch_correction, yaw_correction);
-        $display("[TB] Outputs: Motor1 = %0d, Motor2 = %0d, Motor3 = %0d, Motor4 = %0d", 
-                 motor_1, motor_2, motor_3, motor_4);
+        // Test 1: Neutral Hover Throttle (18,000) & Zero Corrections
+        throttle_in      <= 15'd18000;
+        roll_correction  <= 16'sd0;
+        pitch_correction <= 16'sd0;
+        yaw_correction   <= 16'sd0;
+        check_motors("NEUTRAL_HOVER", 15'd18000, 15'd18000, 15'd18000, 15'd18000);
 
-        if (motor_1 == 15'd18000 && motor_2 == 15'd18000 && 
-            motor_3 == 15'd18000 && motor_4 == 15'd18000) begin
-            $display("[TB] PASS: Neutral test case matched exactly 18,000.");
-        end else begin
-            $display("[TB] FAIL: Neutral test case failed to match 18,000!");
-        end
+        // Test 2: Upper Saturation Clamping (Clamping to 24,000)
+        // M1 = T - R - P + Y: 22000 - (-4000) - (-4000) + 4000 = 34000 -> 24000
+        throttle_in      <= 15'd22000;
+        roll_correction  <= -16'sd4000;
+        pitch_correction <= -16'sd4000;
+        yaw_correction   <= 16'sd4000;
+        check_motors("UPPER_CLAMP_M1", 15'd24000, 15'd18000, 15'd18000, 15'd18000);
 
-        // ==========================================
-        // TEST CASE 2: Upper Saturation Clamping (24,000)
-        // ==========================================
-        $display("[TB] --- Test Case 2: Extreme Over-saturation (Clamping to 24,000) ---");
-        throttle_in = 15'd22000;
-        roll_correction  = -16'sd4000;
-        pitch_correction = -16'sd4000;
-        yaw_correction   = 16'sd4000;
-        #10;
+        // Test 3: Lower Saturation Clamping (Clamping to 12,000)
+        // M1 = 14000 - 6000 - 6000 + (-6000) = -4000 -> 12000
+        throttle_in      <= 15'd14000;
+        roll_correction  <= 16'sd6000;
+        pitch_correction <= 16'sd6000;
+        yaw_correction   <= -16'sd6000;
+        check_motors("LOWER_CLAMP_M1", 15'd12000, 15'd20000, 15'd20000, 15'd20000);
 
-        // Raw M1: 22000 - (-4000) - (-4000) + 4000 = 34000 -> Should clamp to 24000
-        if (motor_1 == 15'd24000) begin
-            $display("[TB] PASS: Motor 1 over-saturation clamped cleanly to 24,000 (2.0 ms) without wrap-around.");
-        end else begin
-            $display("[TB] FAIL: Motor 1 over-saturation clamping failed (Output: %0d)", motor_1);
-        end
+        // Test 4A: Pure Roll Right (Roll > 0)
+        throttle_in      <= 15'd18000;
+        roll_correction  <= 16'sd3000;
+        pitch_correction <= 16'sd0;
+        yaw_correction   <= 16'sd0;
+        check_motors("ROLL_RIGHT", 15'd15000, 15'd15000, 15'd21000, 15'd21000);
 
-        // ==========================================
-        // TEST CASE 3: Lower Saturation Clamping (12,000)
-        // ==========================================
-        $display("[TB] --- Test Case 3: Extreme Under-saturation (Clamping to 12,000) ---");
-        throttle_in = 15'd14000;
-        roll_correction  = 16'sd6000;
-        pitch_correction = 16'sd6000;
-        yaw_correction   = -16'sd6000;
-        #10;
+        // Test 4B: Pure Pitch Up (Pitch > 0)
+        roll_correction  <= 16'sd0;
+        pitch_correction <= 16'sd3000;
+        yaw_correction   <= 16'sd0;
+        check_motors("PITCH_UP", 15'd15000, 15'd21000, 15'd21000, 15'd15000);
 
-        // Raw M1: 14000 - 6000 - 6000 + (-6000) = -4000 -> Should clamp to 12000
-        if (motor_1 == 15'd12000) begin
-            $display("[TB] PASS: Motor 1 under-saturation clamped cleanly to 12,000 (1.0 ms) without wrap-around.");
-        end else begin
-            $display("[TB] FAIL: Motor 1 under-saturation clamping failed (Output: %0d)", motor_1);
-        end
+        // Test 4C: Pure Yaw Clockwise (Yaw > 0)
+        roll_correction  <= 16'sd0;
+        pitch_correction <= 16'sd0;
+        yaw_correction   <= 16'sd3000;
+        check_motors("YAW_CW", 15'd21000, 15'd15000, 15'd21000, 15'd15000);
 
-        $display("[TB] Motor Mixer Verification completed successfully.");
+        // Test 5: Full 16-bit Extreme Arithmetic Stress (+32767 / -32768)
+        throttle_in      <= 15'd24000;
+        roll_correction  <= 16'sd32767;
+        pitch_correction <= 16'sd32767;
+        yaw_correction   <= -16'sd32768;
+        @(posedge clk); #1;
+        check_assert(motor_1 <= 24000 && motor_1 >= 12000 &&
+                     motor_2 <= 24000 && motor_2 >= 12000 &&
+                     motor_3 <= 24000 && motor_3 >= 12000 &&
+                     motor_4 <= 24000 && motor_4 >= 12000,
+                     "ARITHMETIC_STRESS", "Extreme 16-bit signed inputs clamped to ESC bounds without wrap-around", error_count);
+
+        // Test 6: Control Authority Saturation Analysis (Throttle = 23,000)
+        throttle_in      <= 15'd23000;
+        roll_correction  <= 16'sd4000;
+        pitch_correction <= 16'sd0;
+        yaw_correction   <= 16'sd0;
+        check_motors("HIGH_THROTTLE_AUTHORITY", 15'd19000, 15'd19000, 15'd24000, 15'd24000);
+
+        // Standardized Exit
+        finalize_test_suite("MOTOR MIXER", error_count);
         $finish;
     end
 

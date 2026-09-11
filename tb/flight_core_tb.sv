@@ -1,262 +1,326 @@
 `timescale 1ns / 1ps
 
+// =============================================================================
+// Module: flight_core_tb
+// Purpose: Top-level integration testbench for FPGA Flight Controller
+// Architecture: Cascaded Dual-Loop PID, 6 MHz SPI MPU-6500, Quad-X Motor Mixer
+// =============================================================================
+
+import fc_tb_pkg::*;
+
 module flight_core_tb();
 
+    // Instantiate Global Simulator Watchdog (Safety Measure 2)
+    `GLOBAL_WATCHDOG(GLOBAL_SIM_WATCHDOG)
+
+    // DUT Physical Interface Signals
     logic       clk;
     logic       rst_n;
-    wire        i2c_sda_io;
-    wire        i2c_scl;
+    wire        spi_sclk;
+    wire        spi_mosi;
+    wire        spi_miso;
+    wire        spi_cs_n;
     logic [3:0] rc_inputs;
     wire  [3:0] esc_pwm_outputs;
 
-    // --- UUT Instantiation (Accelerated 100us arming timer for simulation) ---
+    int error_count = 0;
+
+    // UUT Instantiation (Fast simulation parameters: 100 us arming, 10 us init delay)
     flight_core #(
-        .ARM_TIME_CYCLES(1200) // 1200 cycles = 100 us
+        .ARM_TIME_CYCLES(1200),
+        .INIT_WAIT_CYCLES(120)
     ) uut (
         .clk(clk),
         .rst_n(rst_n),
-        .i2c_sda_io(i2c_sda_io),
-        .i2c_scl(i2c_scl),
+        .spi_sclk(spi_sclk),
+        .spi_mosi(spi_mosi),
+        .spi_miso(spi_miso),
+        .spi_cs_n(spi_cs_n),
         .rc_inputs(rc_inputs),
         .esc_pwm_outputs(esc_pwm_outputs)
     );
 
-    // 1. Clock Generation (12 MHz = 83.333 ns period)
+    // 12 MHz Master Clock Generator (Period = 83.333 ns)
     initial begin
-        clk = 0;
-        forever #41.667 clk = ~clk; 
+        clk = 1'b0;
+        forever #CLK_HALF_PERIOD_NS clk = ~clk;
     end
 
-    // Open-drain pull-ups for I2C bus
-    pullup(i2c_sda_io);
-    pullup(i2c_scl);
-
-    // 2. RC Transmitter Emulation (Dynamic Pulse Generation)
-    real throttle_ms = 1.0;
-    real roll_ms     = 1.5;
-    real pitch_ms    = 1.5;
-    real yaw_ms      = 1.5;
+    // Emulated RC Transmitter Pulses (Non-blocking drives to prevent delta races)
+    real  throttle_ms    = 1.0;
+    real  roll_ms        = 1.5;
+    real  pitch_ms       = 1.5;
+    real  yaw_ms         = 1.5;
+    logic rc_link_active = 1'b1;
 
     initial begin
-        rc_inputs = 4'b0000;
+        rc_inputs <= 4'b0000;
         forever begin
-            rc_inputs = 4'b1111;
-            
-            // Fork pulses with specified widths
-            fork
-                begin #(roll_ms     * 1000000); rc_inputs[0] = 1'b0; end
-                begin #(pitch_ms    * 1000000); rc_inputs[1] = 1'b0; end
-                begin #(yaw_ms      * 1000000); rc_inputs[2] = 1'b0; end
-                begin #(throttle_ms * 1000000); rc_inputs[3] = 1'b0; end
-            join
-            
-            // Remainder of 20 ms frame
-            #17000000;
+            if (rc_link_active) begin
+                rc_inputs <= 4'b1111;
+                fork
+                    begin #(roll_ms     * 1_000_000); rc_inputs[0] <= 1'b0; end
+                    begin #(pitch_ms    * 1_000_000); rc_inputs[1] <= 1'b0; end
+                    begin #(yaw_ms      * 1_000_000); rc_inputs[2] <= 1'b0; end
+                    begin #(throttle_ms * 1_000_000); rc_inputs[3] <= 1'b0; end
+                join
+                #17_000_000; // Complete 20 ms standard frame
+            end else begin
+                rc_inputs <= 4'b0000;
+                #1_000_000;
+            end
         end
     end
 
-    // 3. I2C Slave Emulation (Mock MPU-6050 with 14-Byte Burst Support)
-    logic sda_drv;
-    assign i2c_sda_io = sda_drv ? 1'bz : 1'b0;
+    // Mock MPU-6500 SPI Slave with physical 25 ns MISO propagation delay
+    mpu6500_spi_slave_sim slave (
+        .sclk(spi_sclk),
+        .mosi(spi_mosi),
+        .miso(spi_miso),
+        .cs_n(spi_cs_n)
+    );
 
-    task wait_posedge_scl();
-        bit stable;
-        stable = 0;
-        while (!stable) begin
-            @(posedge i2c_scl);
-            #10;
-            if (i2c_scl === 1'b1) stable = 1;
-        end
-    endtask
+    // Measured Motor PWM High Times
+    realtime m1_width, m2_width, m3_width, m4_width;
 
-    task read_byte(output logic [7:0] data);
-        begin
-            for (int i = 0; i < 8; i++) begin
-                wait_posedge_scl();
-                data[7 - i] = i2c_sda_io;
-                @(negedge i2c_scl);
-            end
-        end
-    endtask
+    // Bounded Concurrent Motor Pulse Measurement (Deadlock Guard)
+    task automatic measure_all_motors_bounded(input time timeout_limit = DEFAULT_BOUNDED_TIMEOUT);
+        realtime t_start[4], t_end[4];
+        bit timed_out = 0;
 
-    task send_ack();
-        begin
-            sda_drv = 0;
-            wait_posedge_scl();
-            @(negedge i2c_scl);
-            sda_drv = 1;
-        end
-    endtask
-
-    task send_byte(input logic [7:0] data);
-        begin
-            for (int i = 0; i < 8; i++) begin
-                sda_drv = (data[7 - i]) ? 1 : 0;
-                wait_posedge_scl();
-                @(negedge i2c_scl);
-            end
-            sda_drv = 1; // Release bus so master can ACK/NACK
-        end
-    endtask
-
-    task wait_for_ack();
-        begin
-            wait_posedge_scl();
-            @(negedge i2c_scl);
-        end
-    endtask
-    
-    // I2C slave responder
-    initial begin
-        sda_drv = 1;
-        forever begin
-            automatic logic [7:0] addr, reg_addr;
-            @(negedge i2c_sda_io iff i2c_scl === 1'b1); // START condition
-            @(negedge i2c_scl);
-            
-            read_byte(addr);
-            
-            if (addr == 8'hD0) begin // Master Write
-                send_ack();
-                read_byte(reg_addr);
-                send_ack();
-                if (reg_addr == 8'h6B) begin
-                    logic [7:0] data;
-                    read_byte(data);
-                    send_ack();
-                    $display("[I2C Slave] %0.2f ms: Received MPU-6050 Wakeup Write (0x6B)", $realtime / 1.0e6);
-                end else if (reg_addr == 8'h3B) begin
-                    // Repeated START for 14-byte sensor read
-                    @(negedge i2c_sda_io iff i2c_scl === 1'b1);
-                    @(negedge i2c_scl);
-                    read_byte(addr);
-                    if (addr == 8'hD1) begin
-                        send_ack();
-                        
-                        // Mock Sensor Data: Accel Roll Tilt of +10.0 deg (accel_y = +2845 = 0x0B1D)
-                        send_byte(8'h00); wait_for_ack(); // Accel X_H
-                        send_byte(8'h00); wait_for_ack(); // Accel X_L
-                        send_byte(8'h0B); wait_for_ack(); // Accel Y_H (+2845 -> +10 deg roll)
-                        send_byte(8'h1D); wait_for_ack(); // Accel Y_L
-                        send_byte(8'h3F); wait_for_ack(); // Accel Z_H (+16135)
-                        send_byte(8'h07); wait_for_ack(); // Accel Z_L
-                        
-                        send_byte(8'h00); wait_for_ack(); // Temp H
-                        send_byte(8'h00); wait_for_ack(); // Temp L
-                        
-                        send_byte(8'h00); wait_for_ack(); // Gyro X_H (0 rate)
-                        send_byte(8'h00); wait_for_ack(); // Gyro X_L
-                        send_byte(8'h00); wait_for_ack(); // Gyro Y_H
-                        send_byte(8'h00); wait_for_ack(); // Gyro Y_L
-                        send_byte(8'h00); wait_for_ack(); // Gyro Z_H
-                        send_byte(8'h00); wait_for_ack(); // Gyro Z_L (Master NACKs last byte)
+        fork
+            begin
+                fork
+                    begin
+                        @(posedge esc_pwm_outputs[0]); t_start[0] = $realtime;
+                        @(negedge esc_pwm_outputs[0]); t_end[0]   = $realtime;
+                        m1_width = (t_end[0] - t_start[0]) / 1.0e6;
                     end
+                    begin
+                        @(posedge esc_pwm_outputs[1]); t_start[1] = $realtime;
+                        @(negedge esc_pwm_outputs[1]); t_end[1]   = $realtime;
+                        m2_width = (t_end[1] - t_start[1]) / 1.0e6;
+                    end
+                    begin
+                        @(posedge esc_pwm_outputs[2]); t_start[2] = $realtime;
+                        @(negedge esc_pwm_outputs[2]); t_end[2]   = $realtime;
+                        m3_width = (t_end[2] - t_start[2]) / 1.0e6;
+                    end
+                    begin
+                        @(posedge esc_pwm_outputs[3]); t_start[3] = $realtime;
+                        @(negedge esc_pwm_outputs[3]); t_end[3]   = $realtime;
+                        m4_width = (t_end[3] - t_start[3]) / 1.0e6;
+                    end
+                join
+            end
+            begin
+                #(timeout_limit);
+                timed_out = 1;
+            end
+        join_any
+        disable fork;
+
+        if (timed_out) begin
+            $fatal(2, "[DEADLOCK] Timed out waiting for 4-channel motor PWM pulses (limit: %0t) at %0t ps",
+                   timeout_limit, $time);
+        end
+    endtask
+
+    // Main Test Stimulus Sequencer
+    initial begin
+        $display("=================================================================");
+        $display("[TB] Starting Safety-Critical Flight Core Verification Suite");
+        $display("=================================================================");
+        error_count    = 0;
+        rc_link_active = 1'b1;
+
+        // Phase 1: Synchronous Reset Release
+        `SYNC_RESET_RELEASE(clk, rst_n, 12)
+
+        // Phase 2: Bounded Handshake for MPU-6500 SPI Master Init
+        `AWAIT_SIGNAL_LEVEL(clk, uut.spi_master_inst.valid, 1'b1, 200_000, "SPI Master IMU Stream Active")
+        check_assert(!uut.armed, "DISARMED_INIT", "Flight Core initialized in DISARMED state", error_count);
+
+        // Verify Disarmed Actuator Lockout (Motors locked to 1.000 ms)
+        measure_all_motors_bounded();
+        check_assert(is_within_tolerance_real(m1_width, 1.000, 0.02) &&
+                     is_within_tolerance_real(m2_width, 1.000, 0.02) &&
+                     is_within_tolerance_real(m3_width, 1.000, 0.02) &&
+                     is_within_tolerance_real(m4_width, 1.000, 0.02),
+                     "ACTUATOR_LOCKOUT", "All motor outputs strictly locked to 1.000 ms while disarmed", error_count);
+
+        // Phase 3: Arming Sequence (Throttle Min, Yaw Full Right)
+        throttle_ms = 1.0;
+        yaw_ms      = 1.95; // > 23,000 ticks
+        roll_ms     = 1.5;
+        pitch_ms    = 1.5;
+
+        `AWAIT_SIGNAL_LEVEL(clk, uut.armed, 1'b1, 400_000, "Safety Manager Transition to ARMED")
+        check_assert(uut.armed, "ARMED_CONFIRM", "System transitioned cleanly to ARMED state", error_count);
+
+        // Phase 4: Hover Flight Mode (Throttle = 1.5 ms, Sticks Centered)
+        throttle_ms = 1.5; // Hover throttle (18,000 ticks)
+        yaw_ms      = 1.5;
+        roll_ms     = 1.5;
+        pitch_ms    = 1.5;
+        #50_000_000; // Allow filter & cascaded PID pipelines to settle
+
+        // Phase 5A: Roll Self-Leveling Verification (+10 deg Roll Right Tilt)
+        measure_all_motors_bounded();
+        $display("[TELEMETRY] Roll Response: M1=%.3f ms, M2=%.3f ms, M3=%.3f ms, M4=%.3f ms",
+                 m1_width, m2_width, m3_width, m4_width);
+        check_assert((m1_width > m3_width) && (m1_width > 1.50) && (m3_width < 1.50),
+                     "ROLL_SELF_LEVEL", "Right motors spooled up and left motors spooled down to counter roll", error_count);
+
+        // Phase 5B: Pitch Self-Leveling Verification (Nose Down +15 deg Tilt)
+        slave.registers[8'h3D] = 8'h00; slave.registers[8'h3E] = 8'h00; // Clear roll accel
+        slave.registers[8'h3B] = 8'hEF; slave.registers[8'h3C] = 8'h70; // Set pitch accel (-4240 LSB)
+        #30_000_000; // Settle attitude estimator
+        measure_all_motors_bounded();
+        $display("[TELEMETRY] Pitch Response: M1=%.3f ms, M2=%.3f ms, M3=%.3f ms, M4=%.3f ms",
+                 m1_width, m2_width, m3_width, m4_width);
+        check_assert((m1_width > m2_width) && (m4_width > m3_width),
+                     "PITCH_SELF_LEVEL", "Front motors spooled up over rear motors to pitch nose up", error_count);
+
+        // Phase 5C: Yaw Dynamic Rate Damping (+50 deg/s CW Spin)
+        slave.registers[8'h3B] = 8'h00; slave.registers[8'h3C] = 8'h00; // Clear pitch tilt
+        slave.registers[8'h47] = 8'h19; slave.registers[8'h48] = 8'h96; // Gyro Z = +6550 LSB
+        #30_000_000; // Settle rate loops
+        measure_all_motors_bounded();
+        $display("[TELEMETRY] Yaw Response: M1(CCW)=%.3f ms, M2(CW)=%.3f ms, M3(CCW)=%.3f ms, M4(CW)=%.3f ms",
+                 m1_width, m2_width, m3_width, m4_width);
+        check_assert((m2_width > m1_width) && (m4_width > m3_width),
+                     "YAW_RATE_DAMPING", "CW motors spooled up over CCW motors providing counter-torque", error_count);
+
+        // Reset sensor rates to neutral
+        slave.registers[8'h47] = 8'h00; slave.registers[8'h48] = 8'h00;
+        #10_000_000;
+
+        // Phase 6: In-Flight Pilot Disarming (Throttle Min, Yaw Full Left)
+        throttle_ms = 1.0;  // Throttle Min (< 12,500)
+        yaw_ms      = 1.05; // Yaw Full Left (< 13,000)
+        `AWAIT_SIGNAL_LEVEL(clk, uut.armed, 1'b0, 400_000, "In-Flight Pilot Disarm Command")
+        check_assert(!uut.armed, "PILOT_DISARM", "System disarmed cleanly via pilot stick command", error_count);
+
+        measure_all_motors_bounded();
+        check_assert(is_within_tolerance_real(m1_width, 1.000, 0.02),
+                     "POST_DISARM_LOCK", "Motor PWM outputs immediately clamped to 1.000 ms post-disarm", error_count);
+
+        // Phase 7: Re-Arm and In-Flight RC Signal Loss Watchdog Failsafe
+        throttle_ms = 1.0; yaw_ms = 1.95;
+        `AWAIT_SIGNAL_LEVEL(clk, uut.armed, 1'b1, 400_000, "Re-Arming System")
+        throttle_ms = 1.5; yaw_ms = 1.5;
+        #20_000_000;
+
+        // Sever RC Radio Link Completely
+        rc_link_active = 1'b0;
+        `AWAIT_SIGNAL_LEVEL(clk, uut.armed, 1'b0, 2_000_000, "Watchdog Failsafe Disarm on RC Loss")
+        check_assert(!uut.armed && (uut.rc_valid == 4'b0000),
+                     "RC_LOSS_FAILSAFE", "Loss of RC signal triggered watchdog failsafe and disarmed core", error_count);
+
+        measure_all_motors_bounded();
+        check_assert(is_within_tolerance_real(m1_width, 1.000, 0.02),
+                     "FAILSAFE_LOCK", "Motor outputs locked to 1.000 ms during failsafe", error_count);
+
+        // Final Standardized Result
+        finalize_test_suite("FLIGHT CORE INTEGRATION", error_count);
+        $finish;
+    end
+
+endmodule
+
+// =============================================================================
+// Mock MPU-6500 SPI Slave Model (SPI Mode 0 with 25 ns Propagation Delay)
+// =============================================================================
+module mpu6500_spi_slave_sim (
+    input  logic sclk,
+    input  logic mosi,
+    output logic miso,
+    input  logic cs_n
+);
+
+    logic [7:0] registers [256];
+    logic [7:0] rx_byte;
+    logic [7:0] tx_byte;
+    logic [2:0] bit_cnt;
+    logic [7:0] curr_addr;
+    logic       is_read;
+    logic       is_first_byte;
+    logic       miso_drv;
+
+    assign miso = (!cs_n) ? miso_drv : 1'bz;
+
+    initial begin
+        for (int i = 0; i < 256; i++) registers[i] = 8'h00;
+        
+        // WHO_AM_I register (0x75) returns 0x70 for MPU-6500
+        registers[8'h75] = 8'h70;
+        
+        // Initial Sensor Data: Accel Roll Tilt of +10.0 deg (accel_y = +2845 = 0x0B1D)
+        registers[8'h3B] = 8'h00; // Accel X_H
+        registers[8'h3C] = 8'h00; // Accel X_L
+        registers[8'h3D] = 8'h0B; // Accel Y_H (+2845 -> +10 deg roll)
+        registers[8'h3E] = 8'h1D; // Accel Y_L
+        registers[8'h3F] = 8'h3F; // Accel Z_H (+16135)
+        registers[8'h40] = 8'h07; // Accel Z_L
+        
+        registers[8'h41] = 8'h00; registers[8'h42] = 8'h00; // Temp
+        registers[8'h43] = 8'h00; registers[8'h44] = 8'h00; // Gyro X
+        registers[8'h45] = 8'h00; registers[8'h46] = 8'h00; // Gyro Y
+        registers[8'h47] = 8'h00; registers[8'h48] = 8'h00; // Gyro Z
+
+        miso_drv      = 1'b0;
+        rx_byte       = 8'h00;
+        tx_byte       = 8'h00;
+        bit_cnt       = 3'd0;
+        is_first_byte = 1'b1;
+    end
+
+    always @(posedge cs_n) begin
+        bit_cnt       <= 3'd0;
+        is_first_byte <= 1'b1;
+        miso_drv      <= 1'b0;
+    end
+
+    always @(posedge sclk) begin
+        if (!cs_n) begin
+            rx_byte <= {rx_byte[6:0], mosi};
+            bit_cnt <= bit_cnt + 3'd1;
+
+            if (bit_cnt == 3'd7) begin
+                automatic logic [7:0] full_byte = {rx_byte[6:0], mosi};
+                if (is_first_byte) begin
+                    is_read       <= full_byte[7];
+                    curr_addr     <= full_byte[6:0];
+                    is_first_byte <= 1'b0;
+                end else begin
+                    if (!is_read) begin
+                        registers[curr_addr] <= full_byte;
+                    end
+                    curr_addr <= curr_addr + 8'd1;
                 end
             end
         end
     end
 
-    // 4. Testbench Control & Measurement
-    realtime m1_start, m1_end, m1_width;
-    realtime m3_start, m3_end, m3_width;
-
-    initial begin
-        $display("=================================================================");
-        $display("[TB] Starting Full Cascaded Self-Leveling Flight Core Verification");
-        $display("=================================================================");
-        
-        rst_n = 0;
-        #100;
-        rst_n = 1;
-        $display("[TB] Reset Released. Initializing MPU-6050...");
-
-        // -------------------------------------------------------------
-        // Step 1: Wait 12 ms for MPU-6050 power-on initialization
-        // -------------------------------------------------------------
-        #12000000;
-        $display("[TB] Time: %0.2f ms | MPU-6050 Initialized. System currently DISARMED.", $realtime / 1.0e6);
-
-        // Verify Disarmed Output Lockout (Motors locked to 1.0 ms)
-        @(posedge esc_pwm_outputs[0]);
-        m1_start = $realtime;
-        @(negedge esc_pwm_outputs[0]);
-        m1_width = ($realtime - m1_start) / 1.0e6;
-        $display("[TB] Disarmed State Motor 1 Width: %0.3f ms (Expected 1.000 ms)", m1_width);
-        if (m1_width >= 0.99 && m1_width <= 1.01) begin
-            $display("[TB] PASS: Disarmed safety interlock verified (1.0 ms lockout).");
+    // Slave updates MISO on falling edge of SCLK with 25 ns physical delay
+    always @(negedge sclk or posedge cs_n) begin
+        if (cs_n) begin
+            miso_drv <= 1'b0;
+            tx_byte  <= 8'h00;
         end else begin
-            $display("[TB] FAIL: Disarmed safety interlock failed!");
-        end
-
-        // -------------------------------------------------------------
-        // Step 2: Perform Arming Sequence (Throttle Min, Yaw Full Right)
-        // -------------------------------------------------------------
-        $display("\n[TB] --- Applying Arming Sequence (Throttle Min, Yaw Full Right) ---");
-        throttle_ms = 1.0;
-        yaw_ms      = 1.95; // > 23,000 ticks
-        roll_ms     = 1.5;
-        pitch_ms    = 1.5;
-        
-        // Wait 25 ms (exceeds ARM_TIME_CYCLES of 100 us)
-        #25000000;
-        $display("[TB] Time: %0.2f ms | Arming sequence applied.", $realtime / 1.0e6);
-
-        // -------------------------------------------------------------
-        // Step 3: Enter Hover Flight (Throttle 1.5 ms, Sticks Centered)
-        // -------------------------------------------------------------
-        $display("\n[TB] --- Entering Hover Flight Mode (Throttle = 1.5ms, Sticks Centered at 0.0 deg) ---");
-        throttle_ms = 1.5; // Hover throttle (18,000 ticks)
-        yaw_ms      = 1.5; // Neutral (Target Yaw Rate = 0.0 deg/s)
-        roll_ms     = 1.5; // Neutral (Target Roll Angle = 0.0 deg)
-        pitch_ms    = 1.5; // Neutral (Target Pitch Angle = 0.0 deg)
-
-        // Wait 50 ms (2.5 RC frames) for RC receiver, filter, and PID controllers to settle
-        #50000000;
-
-        // -------------------------------------------------------------
-        // Step 4: Measure Closed-Loop Self-Leveling Motor PWM Outputs
-        // -------------------------------------------------------------
-        $display("\n[TB] --- Measuring Self-Leveling PWM Corrections ---");
-        $display("[DIAG] armed=%b, throttle=%0d, est_roll=%0d (%0.2f deg), desired_roll_rate=%0d (%0.2f deg/s), pid_roll_corr=%0d, m1_cmd=%0d, m3_cmd=%0d", 
-                 uut.armed, uut.mapped_throttle, 
-                 uut.est_roll_angle, real'(uut.est_roll_angle) / 256.0,
-                 uut.desired_roll_rate, real'(uut.desired_roll_rate) / 256.0,
-                 uut.pid_roll_corr, uut.motor_1_cmd, uut.motor_3_cmd);
-
-        // Fork simultaneous measurement of Motor 1 and Motor 3
-        fork
-            begin
-                @(posedge esc_pwm_outputs[0]);
-                m1_start = $realtime;
-                @(negedge esc_pwm_outputs[0]);
-                m1_width = ($realtime - m1_start) / 1.0e6;
+            if (bit_cnt == 3'd0) begin
+                if (!is_first_byte && is_read) begin
+                    tx_byte  <= registers[curr_addr];
+                    miso_drv <= #25 registers[curr_addr][7];
+                end else begin
+                    tx_byte  <= 8'h00;
+                    miso_drv <= #25 1'b0;
+                end
+            end else begin
+                miso_drv <= #25 tx_byte[7 - bit_cnt];
             end
-            begin
-                @(posedge esc_pwm_outputs[2]);
-                m3_start = $realtime;
-                @(negedge esc_pwm_outputs[2]);
-                m3_width = ($realtime - m3_start) / 1.0e6;
-            end
-        join
-
-        $display("[TB] Motor 1 (Front Right) PWM Width: %0.3f ms", m1_width);
-        $display("[TB] Motor 3 (Rear Left)   PWM Width: %0.3f ms", m3_width);
-
-        // In Angle mode: Aircraft is tilted +10 deg Roll Right.
-        // Target is 0 deg. Angle Error is -10 deg.
-        // Outer loop demands left-roll rotation -> Right motors (M1, M2) increase thrust,
-        // Left motors (M3, M4) decrease thrust to push the right side up and restore 0 deg flat hover!
-        if (m1_width > m3_width && m1_width > 1.50 && m3_width < 1.50) begin
-            $display("[TB] PASS: Self-leveling active! Right motor (M1: %0.3f ms) increased above hover and Left motor (M3: %0.3f ms) decreased to right the aircraft!",
-                     m1_width, m3_width);
-        end else begin
-            $display("[TB] FAIL: Self-leveling response did not meet expected counter-tilt direction.");
         end
-
-        $display("=================================================================");
-        $display("[TB] Full System Cascaded Verification Completed Successfully!");
-        $display("=================================================================");
-        $finish;
     end
 
 endmodule

@@ -1,8 +1,16 @@
 `timescale 1ns / 1ps
 
+// =============================================================================
+// Module: pid_calculator_tb
+// Purpose: Unit verification for pid_calculator (Q8.8 math, anti-windup, gating)
+// =============================================================================
+
+import fc_tb_pkg::*;
+
 module pid_calculator_tb();
 
-    // 1. Testbench Signals
+    `GLOBAL_WATCHDOG(10ms)
+
     logic               clk;
     logic               rst_n;
     logic               enable;
@@ -15,8 +23,9 @@ module pid_calculator_tb();
     logic signed [15:0] d_gain;
     
     logic signed [15:0] pid_correction;
+    int error_count = 0;
 
-    // 2. Instantiate UUT (Unit Under Test)
+    // Instantiate UUT
     pid_calculator uut (
         .clk(clk),
         .rst_n(rst_n),
@@ -30,151 +39,113 @@ module pid_calculator_tb();
         .pid_correction(pid_correction)
     );
 
-    // 3. Generate Clock
-    always begin
-        clk = 1'b1;
-        #5;
+    // Clock Generator (10 ns period)
+    initial begin
         clk = 1'b0;
-        #5;
+        forever #5 clk = ~clk;
     end
 
-    // Helper task to pulse enable for 1 clock cycle
-    task trigger_update();
-        begin
-            enable = 1'b1;
-            #10;
-            enable = 1'b0;
-            #10;
-        end
+    // Task to strobe enable for 1 cycle synchronously
+    task automatic trigger_update();
+        @(posedge clk);
+        enable <= 1'b1;
+        @(posedge clk);
+        enable <= 1'b0;
+        @(posedge clk);
     endtask
 
-    // 4. Test Stimulus Block
     initial begin
-        $display("[TB] Starting PID Calculator Verification...");
-        
-        // Reset
-        rst_n = 1'b0;
-        enable = 1'b0;
-        clear_i = 1'b0;
-        target_val = 16'sd0;
-        actual_val = 16'sd0;
-        p_gain = 16'sd0;
-        i_gain = 16'sd0;
-        d_gain = 16'sd0;
-        #20;
-        rst_n = 1'b1;
-        #10;
+        $display("=================================================================");
+        $display("[TB] Starting Hardened PID Calculator Verification Suite");
+        $display("=================================================================");
+        error_count = 0;
+        enable      <= 1'b0;
+        clear_i     <= 1'b0;
+        target_val  <= 16'sd0;
+        actual_val  <= 16'sd0;
+        p_gain      <= 16'sd0;
+        i_gain      <= 16'sd0;
+        d_gain      <= 16'sd0;
 
-        // ==========================================
-        // TEST CASE 1: Standard Proportional Tracking
-        // ==========================================
-        $display("[TB] --- Test Case 1: Standard Proportional Tracking ---");
-        // Target = +10.0 (0x0A00), Actual = +8.5 (0x0880)
-        // Error = +1.5. P_gain = 2.0 (0x0200)
-        // Expected Proportional Correction = +3.0 (0x0300)
-        target_val = 16'sh0A00;
-        actual_val = 16'sh0880;
-        p_gain = 16'sh0200;
-        i_gain = 16'sh0000;
-        d_gain = 16'sh0000;
-        #10;
-        
-        $display("[TB] Target: 0x%h, Actual: 0x%h, P-Gain: 0x%h", target_val, actual_val, p_gain);
-        $display("[TB] Output Correction: 0x%h (Expected: 0x0300)", pid_correction);
-        
-        if (pid_correction == 16'sh0300) begin
-            $display("[TB] PASS: Proportional output matches exactly +3.0 after scaling.");
-        end else begin
-            $display("[TB] FAIL: Proportional output mismatched.");
-        end
-        trigger_update(); // lock in the state
+        `SYNC_RESET_RELEASE(clk, rst_n, 5)
 
-        // ==========================================
-        // TEST CASE 2: Derivative Response
-        // ==========================================
-        $display("[TB] --- Test Case 2: Derivative Response ---");
-        // Step actual value to +9.5 (0x0980). New Error = +0.5.
-        // Prev Error = +1.5. Derivative Error = New - Prev = 0.5 - 1.5 = -1.0.
-        // D_gain = 1.0 (0x0100).
-        // Expected Derivative Correction = -1.0 (0xFF00)
-        target_val = 16'sh0A00;
-        actual_val = 16'sh0980;
-        p_gain = 16'sh0000; // Disable P
-        i_gain = 16'sh0000;
-        d_gain = 16'sh0100;
-        #10; // Let combinational logic settle
-        
-        $display("[TB] New Actual: 0x%h, D-Gain: 0x%h", actual_val, d_gain);
-        $display("[TB] Output Correction: 0x%h (Expected: 0xff00)", pid_correction);
-
-        if (pid_correction == 16'shFF00) begin
-            $display("[TB] PASS: Derivative output calculates change in error (-1.0) correctly.");
-        end else begin
-            $display("[TB] FAIL: Derivative output mismatched.");
-        end
+        // Test 1: Standard Proportional Tracking
+        // Target = +10.0 (0x0A00), Actual = +8.5 (0x0880), Error = +1.5, P_gain = 2.0 (0x0200) -> Output = +3.0 (0x0300)
+        target_val <= 16'sh0A00;
+        actual_val <= 16'sh0880;
+        p_gain     <= 16'sh0200;
+        i_gain     <= 16'sh0000;
+        d_gain     <= 16'sh0000;
+        @(posedge clk); #1;
+        check_assert(pid_correction === 16'sh0300, "PROPORTIONAL_TRACKING",
+                     "P-term produces exact +3.0 (0x0300) correction", error_count);
         trigger_update();
 
-        // ==========================================
-        // TEST CASE 3: Integral Accumulation and Anti-Windup
-        // ==========================================
-        $display("[TB] --- Test Case 3: Integral Accumulation and Anti-Windup ---");
-        
-        // Reset everything to start fresh
-        rst_n = 1'b0; #20; rst_n = 1'b1; #10;
-        
-        // Target = +10.0 (0x0A00), Actual = 0.0
-        // Error = +10.0 (2560 ticks). I_gain = 1.0 (0x0100).
-        target_val = 16'sh0A00;
-        actual_val = 16'sh0000;
-        p_gain = 16'sh0000;
-        i_gain = 16'sh0100;
-        d_gain = 16'sh0000;
-        
-        // Loop 5000 times. 10.0 * 5000 = 50,000, which exceeds 32767.
-        // Integral should clamp to 32767 (0x7FFF).
-        $display("[TB] Ramping up integral with continuous error (+10.0) for 5000 cycles...");
-        for (int i = 0; i < 5000; i++) begin
-            trigger_update();
-        end
-        #10;
-
-        $display("[TB] Output Correction: 0x%h (Expected clamped to 0x7FFF)", pid_correction);
-        
-        if (pid_correction == 16'sh7FFF) begin
-            $display("[TB] PASS: Integral accumulator saturated cleanly at its maximum limit without wrapping.");
-        end else begin
-            $display("[TB] FAIL: Integral accumulator anti-windup failed. Output: %d", pid_correction);
-        end
-
-        // Negative accumulation test to verify INT_MIN clamping
-        $display("[TB] --- Test Case 3b: Negative Anti-Windup ---");
-        target_val = -16'sh0A00; // -10.0
-        actual_val = 16'sh0000;
-        $display("[TB] Ramping down integral with continuous negative error (-10.0) for 10000 cycles...");
-        for (int i = 0; i < 10000; i++) begin
-            trigger_update();
-        end
-        #10;
-
-        $display("[TB] Output Correction: 0x%h (Expected clamped to 0x8000)", pid_correction);
-        
-        // Test Case 4: Verify clear_i resets integral accumulator
-        $display("[TB] --- Test Case 4: Integral Reset via clear_i ---");
-        clear_i = 1'b1;
-        #10;
-        clear_i = 1'b0;
-        target_val = 16'sh0000;
-        actual_val = 16'sh0000;
+        // Test 2: Derivative Response
+        // Step actual to +9.5 (0x0980). New Error = +0.5. Prev Error = +1.5. Deriv = -1.0. D_gain = 1.0 -> -1.0 (0xFF00)
+        actual_val <= 16'sh0980;
+        p_gain     <= 16'sh0000;
+        d_gain     <= 16'sh0100;
+        @(posedge clk); #1;
+        check_assert(pid_correction === 16'shFF00, "DERIVATIVE_RESPONSE",
+                     "D-term calculates change in error (-1.0 = 0xFF00) correctly", error_count);
         trigger_update();
-        #10;
-        $display("[TB] Output Correction after clear_i: 0x%h (Expected 0x0000)", pid_correction);
-        if (pid_correction == 16'sh0000) begin
-            $display("[TB] PASS: clear_i successfully zeroed the integral accumulator.");
-        end else begin
-            $display("[TB] FAIL: clear_i did not zero integral accumulator.");
-        end
 
-        $display("[TB] PID Calculator Verification completed successfully.");
+        // Test 3: Positive Anti-Windup Clamping
+        target_val <= 16'sh0A00;
+        actual_val <= 16'sh0000;
+        p_gain     <= 16'sh0000;
+        i_gain     <= 16'sh0100; // 1.0
+        d_gain     <= 16'sh0000;
+        `SYNC_RESET_RELEASE(clk, rst_n, 5)
+
+        for (int i = 0; i < 5000; i++) trigger_update();
+        @(posedge clk); #1;
+        check_assert(pid_correction === 16'sh7FFF, "INTEGRAL_POS_CLAMP",
+                     "Integral accumulator clamped cleanly to INT_MAX (0x7FFF) without wrapping", error_count);
+
+        // Test 3b: Negative Anti-Windup Clamping
+        target_val <= -16'sh0A00;
+        for (int i = 0; i < 10000; i++) trigger_update();
+        @(posedge clk); #1;
+        check_assert(pid_correction === -16'sh8000, "INTEGRAL_NEG_CLAMP",
+                     "Integral accumulator clamped cleanly to INT_MIN (-32768) without wrapping", error_count);
+
+        // Test 4: Integral Reset via clear_i
+        clear_i <= 1'b1;
+        @(posedge clk);
+        clear_i <= 1'b0;
+        target_val <= 16'sh0000;
+        trigger_update();
+        @(posedge clk); #1;
+        check_assert(pid_correction === 16'sh0000, "CLEAR_I_RESET",
+                     "clear_i successfully zeroed the integral accumulator", error_count);
+
+        // Test 5: Combined Output Saturation Clamping (+/-32767 / -32768)
+        target_val <= 16'sh6400; // +100.0
+        actual_val <= 16'sh0000;
+        p_gain     <= 16'sh2000; // 32.0
+        @(posedge clk); #1;
+        check_assert(pid_correction === 16'sh7FFF, "COMBINED_CLAMP_POS",
+                     "Combined PID output clamped cleanly to positive limit 0x7FFF", error_count);
+
+        target_val <= -16'sh6400; // -100.0
+        @(posedge clk); #1;
+        check_assert(pid_correction === -16'sh8000, "COMBINED_CLAMP_NEG",
+                     "Combined PID output clamped cleanly to negative limit 0x8000", error_count);
+
+        // Test 6: Enable Strobe Gating
+        `SYNC_RESET_RELEASE(clk, rst_n, 5)
+        target_val <= 16'sh0500;
+        p_gain     <= 16'sh0100;
+        i_gain     <= 16'sh0100;
+        enable     <= 1'b0; // HOLD ENABLE LOW
+        repeat (100) @(posedge clk);
+        check_assert(uut.integral_error === 32'sd0 && uut.prev_error === 16'sd0, "ENABLE_GATING",
+                     "Accumulator state strictly held constant while enable=0", error_count);
+
+        // Standardized Exit
+        finalize_test_suite("PID CALCULATOR", error_count);
         $finish;
     end
 

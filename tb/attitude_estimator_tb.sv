@@ -1,6 +1,15 @@
 `timescale 1ns / 1ps
 
+// =============================================================================
+// Module: attitude_estimator_tb
+// Purpose: Unit verification for attitude_estimator (Complementary filter, noise)
+// =============================================================================
+
+import fc_tb_pkg::*;
+
 module attitude_estimator_tb();
+
+    `GLOBAL_WATCHDOG(100ms)
 
     logic               clk;
     logic               rst_n;
@@ -14,6 +23,7 @@ module attitude_estimator_tb();
     
     logic signed [15:0] roll_angle;
     logic signed [15:0] pitch_angle;
+    int error_count = 0;
 
     // Instantiate UUT
     attitude_estimator uut (
@@ -30,76 +40,107 @@ module attitude_estimator_tb();
         .pitch_angle(pitch_angle)
     );
 
-    // 12 MHz clock
-    always begin
-        clk = 1'b1; #41.667;
-        clk = 1'b0; #41.667;
+    // 12 MHz Master Clock
+    initial begin
+        clk = 1'b0;
+        forever #CLK_HALF_PERIOD_NS clk = ~clk;
     end
 
-    // Task to strobe enable at 1 kHz (every 1 ms = 1,000,000 ns in simulation, but we can step faster for testing)
-    task step_filter(input int steps);
-        begin
-            for (int i = 0; i < steps; i++) begin
-                #100;
-                enable = 1'b1;
-                #83.333;
-                enable = 1'b0;
-            end
+    // Task to strobe enable synchronously for N updates
+    task automatic step_filter(input int steps);
+        for (int i = 0; i < steps; i++) begin
+            @(posedge clk);
+            enable <= 1'b1;
+            @(posedge clk);
+            enable <= 1'b0;
         end
     endtask
 
     initial begin
-        $display("[TB] Starting Attitude Estimator Verification...");
-        rst_n = 1'b0;
-        enable = 1'b0;
-        accel_x = 16'sd0;
-        accel_y = 16'sd0;
-        accel_z = 16'sd16384; // 1g down
-        gyro_x = 16'sd0;
-        gyro_y = 16'sd0;
-        gyro_z = 16'sd0;
-        #200;
-        rst_n = 1'b1;
-        #200;
+        $display("=================================================================");
+        $display("[TB] Starting Hardened 6-DOF Attitude Estimator Verification");
+        $display("=================================================================");
+        error_count = 0;
+        enable      <= 1'b0;
+        accel_x     <= 16'sd0;
+        accel_y     <= 16'sd0;
+        accel_z     <= 16'sd16384; // 1g down
+        gyro_x      <= 16'sd0;
+        gyro_y      <= 16'sd0;
+        gyro_z      <= 16'sd0;
+
+        `SYNC_RESET_RELEASE(clk, rst_n, 5)
 
         // Test 1: Flat level at rest (Expected 0.0 deg)
-        $display("[TB] --- Test 1: Flat level at rest ---");
         step_filter(50);
-        $display("[TB] Flat Level: Roll = %0.2f deg (0x%h), Pitch = %0.2f deg (0x%h)", 
-                 real'(roll_angle) / 256.0, roll_angle, real'(pitch_angle) / 256.0, pitch_angle);
-        if (roll_angle == 16'sd0 && pitch_angle == 16'sd0) begin
-            $display("[TB] PASS: Flat level estimation is exactly 0.0 degrees.");
-        end else begin
-            $display("[TB] FAIL: Flat level mismatch.");
-        end
+        check_assert(roll_angle === 16'sd0 && pitch_angle === 16'sd0, "FLAT_LEVEL",
+                     "Flat level estimation is exactly 0.0 degrees", error_count);
 
-        // Test 2: Static Roll Tilt of +10.0 degrees (accel_y = 16384 * sin(10 deg) = 2845)
-        $display("[TB] --- Test 2: Static Roll Tilt of +10.0 deg ---");
-        accel_y = 16'sd2845;
-        accel_z = 16'sd16135;
-        step_filter(200); // 200 ms to converge
-        $display("[TB] Converged Roll = %0.2f deg (0x%h) (Expected ~+10.0 deg / 0x0A00)", 
-                 real'(roll_angle) / 256.0, roll_angle);
-        if (roll_angle >= 16'sd2400 && roll_angle <= 16'sd2700) begin
-            $display("[TB] PASS: Filter converged cleanly to +10.0 deg Roll angle.");
-        end else begin
-            $display("[TB] FAIL: Filter failed to converge to +10.0 deg.");
-        end
+        // Test 2: Static Roll Tilt (+10.0 deg: accel_y = +2845)
+        accel_y <= 16'sd2845;
+        accel_z <= 16'sd16135;
+        step_filter(200); // 200 updates to converge
+        check_assert(roll_angle >= 16'sd2400 && roll_angle <= 16'sd2700, "ROLL_TILT_POS",
+                     "Filter converged cleanly to +10.0 deg Roll (~2560 LSB)", error_count);
 
-        // Test 3: Static Pitch Tilt of +15.0 degrees (accel_x = -16384 * sin(15 deg) = -4240)
-        $display("[TB] --- Test 3: Static Pitch Tilt of +15.0 deg ---");
-        accel_y = 16'sd0;
-        accel_x = -16'sd4240;
+        // Test 3: Static Pitch Tilt (+15.0 deg: accel_x = -4240)
+        accel_y <= 16'sd0;
+        accel_x <= -16'sd4240;
         step_filter(200);
-        $display("[TB] Converged Pitch = %0.2f deg (0x%h) (Expected ~+15.0 deg / 0x0F00)", 
-                 real'(pitch_angle) / 256.0, pitch_angle);
-        if (pitch_angle >= 16'sd3700 && pitch_angle <= 16'sd4000) begin
-            $display("[TB] PASS: Filter converged cleanly to +15.0 deg Pitch angle.");
-        end else begin
-            $display("[TB] FAIL: Filter failed to converge to +15.0 deg.");
-        end
+        check_assert(pitch_angle >= 16'sd3700 && pitch_angle <= 16'sd4000, "PITCH_TILT_POS",
+                     "Filter converged cleanly to +15.0 deg Pitch (~3840 LSB)", error_count);
 
-        $display("[TB] Attitude Estimator Verification Completed Successfully.");
+        // Test 4: Dynamic Gyro Rate Integration (+50 deg/s Roll Rate)
+        accel_x <= 16'sd0;
+        accel_y <= 16'sd0;
+        accel_z <= 16'sd16384;
+        step_filter(200); // re-level fully
+        gyro_x  <= 16'sd6550; // +50 dps
+        step_filter(20);
+        check_assert(roll_angle >= 16'sd170 && roll_angle <= 16'sd300, "GYRO_INTEGRATION",
+                     "Gyro dynamic rate integration pipeline accumulated rotation accurately", error_count);
+        gyro_x  <= 16'sd0;
+
+        // Test 5A: Negative Roll Symmetrical Tilt (-10.0 deg)
+        accel_y <= -16'sd2845;
+        accel_z <= 16'sd16135;
+        step_filter(200);
+        check_assert(roll_angle <= -16'sd2400 && roll_angle >= -16'sd2700, "ROLL_TILT_NEG",
+                     "Negative Roll angle converged symmetrically without 2's complement error", error_count);
+
+        // Test 5B: Negative Pitch Symmetrical Tilt (-15.0 deg)
+        accel_y <= 16'sd0;
+        accel_x <= 16'sd4240;
+        step_filter(200);
+        check_assert(pitch_angle <= -16'sd3700 && pitch_angle >= -16'sd4000, "PITCH_TILT_NEG",
+                     "Negative Pitch angle converged symmetrically", error_count);
+
+        // Test 6: High-Frequency Motor Vibration Noise Rejection (+/-0.25g / 14 deg raw)
+        accel_x <= 16'sd0;
+        accel_y <= 16'sd0;
+        accel_z <= 16'sd16384;
+        step_filter(200);
+
+        for (int i = 0; i < 100; i++) begin
+            accel_y <= (i % 2 == 0) ? 16'sd4000 : -16'sd4000;
+            @(posedge clk); enable <= 1'b1;
+            @(posedge clk); enable <= 1'b0;
+        end
+        check_assert(roll_angle >= -16'sd150 && roll_angle <= 16'sd150, "VIBRATION_REJECTION",
+                     "High-frequency motor vibration (14 deg raw ripple) attenuated to < 0.6 deg", error_count);
+        accel_y <= 16'sd0;
+
+        // Test 7: Simultaneous Dual-Axis Dynamic Rotation (+50 dps Roll, -50 dps Pitch)
+        step_filter(200);
+        gyro_x <= 16'sd6550;
+        gyro_y <= -16'sd6550;
+        step_filter(20);
+        check_assert(roll_angle >= 16'sd170 && roll_angle <= 16'sd300 &&
+                     pitch_angle <= -16'sd170 && pitch_angle >= -16'sd300,
+                     "DUAL_AXIS_ROTATION", "Dual-axis dynamic rates integrated with zero cross-axis leakage", error_count);
+
+        // Standardized Exit
+        finalize_test_suite("ATTITUDE ESTIMATOR", error_count);
         $finish;
     end
 

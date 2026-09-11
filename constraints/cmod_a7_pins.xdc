@@ -11,10 +11,11 @@ create_clock -add -name sys_clk_pin -period 83.333 -waveform {0 41.667} [get_por
 ## 2. Active-Low Synchronized Reset (Mapped to On-Board Button 0 with PULLUP)
 set_property -dict { PACKAGE_PIN A18   IOSTANDARD LVCMOS33 } [get_ports { rst_n }];
 
-## 3. I2C Interface to MPU-6050 6-DOF IMU (Open-Drain with On-Chip Pull-Up)
-## Connect 4.7k external pull-up resistors on hardware breakout
-set_property -dict { PACKAGE_PIN M3    IOSTANDARD LVCMOS33 PULLUP true } [get_ports { i2c_scl }];    # PIO1
-set_property -dict { PACKAGE_PIN L3    IOSTANDARD LVCMOS33 PULLUP true } [get_ports { i2c_sda_io }]; # PIO2
+## 3. 4-Wire SPI Interface to MPU-6500 6-DOF IMU (Mode 0, 6 MHz Streaming)
+set_property -dict { PACKAGE_PIN M3    IOSTANDARD LVCMOS33 } [get_ports { spi_sclk }]; # PIO1: Serial Clock
+set_property -dict { PACKAGE_PIN L3    IOSTANDARD LVCMOS33 } [get_ports { spi_mosi }]; # PIO2: Master Out Slave In
+set_property -dict { PACKAGE_PIN J1    IOSTANDARD LVCMOS33 PULLUP true } [get_ports { spi_miso }]; # PIO11: Master In Slave Out
+set_property -dict { PACKAGE_PIN K2    IOSTANDARD LVCMOS33 } [get_ports { spi_cs_n }]; # PIO12: Active-Low Chip Select
 
 ## 4. RC Receiver PWM Inputs (50 Hz nominal pulse inputs, 1.0 - 2.0 ms)
 set_property -dict { PACKAGE_PIN A16   IOSTANDARD LVCMOS33 } [get_ports { rc_inputs[0] }]; # PIO3: Roll Input
