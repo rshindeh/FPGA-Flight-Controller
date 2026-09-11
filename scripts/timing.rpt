@@ -1,0 +1,537 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2026 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2025.2.1 (win64) Build 6403652 Thu Mar 19 19:48:24 GMT 2026
+| Date         : Thu Sep 10 22:59:56 2026
+| Host         : Zephyrus running 64-bit major release  (build 9200)
+| Command      : report_timing_summary -file scripts/timing.rpt
+| Design       : flight_core
+| Device       : 7a35t-cpg236
+| Speed File   : -1  PRODUCTION 1.23 2018-06-13
+| Design State : Synthesized
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+Timing Summary Report
+
+------------------------------------------------------------------------------------------------
+| Timer Settings
+| --------------
+------------------------------------------------------------------------------------------------
+
+  Enable Multi Corner Analysis               :  Yes
+  Enable Pessimism Removal                   :  Yes
+  Pessimism Removal Resolution               :  Nearest Common Node
+  Enable Input Delay Default Clock           :  No
+  Enable Preset / Clear Arcs                 :  No
+  Disable Flight Delays                      :  No
+  Ignore I/O Paths                           :  No
+  Timing Early Launch at Borrowing Latches   :  No
+  Borrow Time for Max Delay Exceptions       :  Yes
+  Merge Timing Exceptions                    :  Yes
+  Inter-SLR Compensation                     :  Conservative
+
+  Corner  Analyze    Analyze    
+  Name    Max Paths  Min Paths  
+  ------  ---------  ---------  
+  Slow    Yes        Yes        
+  Fast    Yes        Yes        
+
+
+------------------------------------------------------------------------------------------------
+| Report Methodology
+| ------------------
+------------------------------------------------------------------------------------------------
+
+No report available as report_methodology has not been run prior. Run report_methodology on the current design for the summary of methodology violations.
+
+
+
+check_timing report
+
+Table of Contents
+-----------------
+1. checking no_clock (0)
+2. checking constant_clock (0)
+3. checking pulse_width_clock (0)
+4. checking unconstrained_internal_endpoints (0)
+5. checking no_input_delay (6)
+6. checking no_output_delay (7)
+7. checking multiple_clock (0)
+8. checking generated_clocks (0)
+9. checking loops (0)
+10. checking partial_input_delay (0)
+11. checking partial_output_delay (0)
+12. checking latch_loops (0)
+
+1. checking no_clock (0)
+------------------------
+ There are 0 register/latch pins with no clock.
+
+
+2. checking constant_clock (0)
+------------------------------
+ There are 0 register/latch pins with constant_clock.
+
+
+3. checking pulse_width_clock (0)
+---------------------------------
+ There are 0 register/latch pins which need pulse_width check
+
+
+4. checking unconstrained_internal_endpoints (0)
+------------------------------------------------
+ There are 0 pins that are not constrained for maximum delay.
+
+ There are 0 pins that are not constrained for maximum delay due to constant clock.
+
+
+5. checking no_input_delay (6)
+------------------------------
+ There are 2 input ports with no input delay specified. (HIGH)
+
+ There are 4 input ports with no input delay but user has a false path constraint. (MEDIUM)
+
+
+6. checking no_output_delay (7)
+-------------------------------
+ There are 7 ports with no output delay specified. (HIGH)
+
+ There are 0 ports with no output delay but user has a false path constraint
+
+ There are 0 ports with no output delay but with a timing clock defined on it or propagating through it
+
+
+7. checking multiple_clock (0)
+------------------------------
+ There are 0 register/latch pins with multiple clocks.
+
+
+8. checking generated_clocks (0)
+--------------------------------
+ There are 0 generated clocks that are not connected to a clock source.
+
+
+9. checking loops (0)
+---------------------
+ There are 0 combinational loops in the design.
+
+
+10. checking partial_input_delay (0)
+------------------------------------
+ There are 0 input ports with partial input delay specified.
+
+
+11. checking partial_output_delay (0)
+-------------------------------------
+ There are 0 ports with partial output delay specified.
+
+
+12. checking latch_loops (0)
+----------------------------
+ There are 0 combinational latch loops in the design through latch input
+
+
+
+------------------------------------------------------------------------------------------------
+| Design Timing Summary
+| ---------------------
+------------------------------------------------------------------------------------------------
+
+    WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints     WPWS(ns)     TPWS(ns)  TPWS Failing Endpoints  TPWS Total Endpoints  
+    -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------     --------     --------  ----------------------  --------------------  
+     28.086        0.000                      0                 1778        0.142        0.000                      0                 1778       41.166        0.000                       0                   986  
+
+
+All user specified timing constraints are met.
+
+
+------------------------------------------------------------------------------------------------
+| Clock Summary
+| -------------
+------------------------------------------------------------------------------------------------
+
+Clock        Waveform(ns)       Period(ns)      Frequency(MHz)
+-----        ------------       ----------      --------------
+sys_clk_pin  {0.000 41.667}     83.333          12.000          
+
+
+------------------------------------------------------------------------------------------------
+| Intra Clock Table
+| -----------------
+------------------------------------------------------------------------------------------------
+
+Clock             WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints     WPWS(ns)     TPWS(ns)  TPWS Failing Endpoints  TPWS Total Endpoints  
+-----             -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------     --------     --------  ----------------------  --------------------  
+sys_clk_pin        28.086        0.000                      0                 1778        0.142        0.000                      0                 1778       41.166        0.000                       0                   986  
+
+
+------------------------------------------------------------------------------------------------
+| Inter Clock Table
+| -----------------
+------------------------------------------------------------------------------------------------
+
+From Clock    To Clock          WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints  
+----------    --------          -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------  
+
+
+------------------------------------------------------------------------------------------------
+| Other Path Groups Table
+| -----------------------
+------------------------------------------------------------------------------------------------
+
+Path Group    From Clock    To Clock          WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints  
+----------    ----------    --------          -------      -------  ---------------------  -------------------      -------      -------  ---------------------  -------------------  
+
+
+------------------------------------------------------------------------------------------------
+| Timing Details
+| --------------
+------------------------------------------------------------------------------------------------
+
+
+---------------------------------------------------------------------------------------------------
+From Clock:  sys_clk_pin
+  To Clock:  sys_clk_pin
+
+Setup :            0  Failing Endpoints,  Worst Slack       28.086ns,  Total Violation        0.000ns
+Hold  :            0  Failing Endpoints,  Worst Slack        0.142ns,  Total Violation        0.000ns
+PW    :            0  Failing Endpoints,  Worst Slack       41.166ns,  Total Violation        0.000ns
+---------------------------------------------------------------------------------------------------
+
+
+Max Delay Paths
+--------------------------------------------------------------------------------------
+Slack (MET) :             28.086ns  (required time - arrival time)
+  Source:                 rc_rx_inst/chan_gen[0].channel_out_reg[0][6]/C
+                            (rising edge-triggered cell FDPE clocked by sys_clk_pin  {rise@0.000ns fall@41.667ns period=83.333ns})
+  Destination:            gen_esc_pwm[2].esc_pwm_inst/duty_cycle_buf_reg[11]/D
+                            (rising edge-triggered cell FDCE clocked by sys_clk_pin  {rise@0.000ns fall@41.667ns period=83.333ns})
+  Path Group:             sys_clk_pin
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            83.333ns  (sys_clk_pin rise@83.333ns - sys_clk_pin rise@0.000ns)
+  Data Path Delay:        55.096ns  (logic 33.952ns (61.623%)  route 21.144ns (38.376%))
+  Logic Levels:           74  (CARRY4=53 DSP48E1=4 LUT2=2 LUT3=2 LUT4=4 LUT5=3 LUT6=6)
+  Clock Path Skew:        -0.145ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    2.695ns = ( 86.028 - 83.333 ) 
+    Source Clock Delay      (SCD):    2.956ns
+    Clock Pessimism Removal (CPR):    0.116ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock sys_clk_pin rise edge)
+                                                      0.000     0.000 r  
+    L17                                               0.000     0.000 r  clk (IN)
+                         net (fo=0)                   0.000     0.000    clk
+    L17                  IBUF (Prop_ibuf_I_O)         1.476     1.476 r  clk_IBUF_inst/O
+                         net (fo=1, unplaced)         0.800     2.276    clk_IBUF
+                         BUFG (Prop_bufg_I_O)         0.096     2.372 r  clk_IBUF_BUFG_inst/O
+                         net (fo=985, unplaced)       0.584     2.956    rc_rx_inst/clk_IBUF_BUFG
+                         FDPE                                         r  rc_rx_inst/chan_gen[0].channel_out_reg[0][6]/C
+  -------------------------------------------------------------------    -------------------
+                         FDPE (Prop_fdpe_C_Q)         0.456     3.412 r  rc_rx_inst/chan_gen[0].channel_out_reg[0][6]/Q
+                         net (fo=1, unplaced)         0.983     4.395    rc_rx_inst/rc_channels[0][6]
+                         CARRY4 (Prop_carry4_S[3]_CO[3])
+                                                      0.671     5.066 r  rc_rx_inst/prev_error_reg[15]_i_84/CO[3]
+                         net (fo=1, unplaced)         0.009     5.075    rc_rx_inst/prev_error_reg[15]_i_84_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117     5.192 r  rc_rx_inst/prev_error_reg[15]_i_71/CO[3]
+                         net (fo=1, unplaced)         0.000     5.192    rc_rx_inst/prev_error_reg[15]_i_71_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117     5.309 r  rc_rx_inst/prev_error_reg[15]_i_31/CO[3]
+                         net (fo=1, unplaced)         0.000     5.309    rc_rx_inst/prev_error_reg[15]_i_31_n_0
+                         CARRY4 (Prop_carry4_CI_CO[0])
+                                                      0.281     5.590 r  rc_rx_inst/prev_error_reg[15]_i_12/CO[0]
+                         net (fo=311, unplaced)       1.111     6.701    rc_rx_inst/prev_error_reg[15]_i_12_n_3
+                         CARRY4 (Prop_carry4_S[3]_O[3])
+                                                      0.622     7.323 f  rc_rx_inst/prev_error_reg[15]_i_68/O[3]
+                         net (fo=30, unplaced)        0.688     8.011    rc_rx_inst/rc_mapper_inst/aD2M4dsP[20]
+                         LUT6 (Prop_lut6_I3_O)        0.307     8.318 r  rc_rx_inst/prev_error[3]_i_142/O
+                         net (fo=2, unplaced)         0.913     9.231    rc_rx_inst/prev_error[3]_i_142_n_0
+                         LUT6 (Prop_lut6_I0_O)        0.124     9.355 r  rc_rx_inst/prev_error[3]_i_146/O
+                         net (fo=1, unplaced)         0.000     9.355    rc_rx_inst/prev_error[3]_i_146_n_0
+                         CARRY4 (Prop_carry4_S[3]_CO[3])
+                                                      0.376     9.731 r  rc_rx_inst/prev_error_reg[3]_i_89/CO[3]
+                         net (fo=1, unplaced)         0.000     9.731    rc_rx_inst/prev_error_reg[3]_i_89_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117     9.848 r  rc_rx_inst/prev_error_reg[3]_i_51/CO[3]
+                         net (fo=1, unplaced)         0.000     9.848    rc_rx_inst/prev_error_reg[3]_i_51_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117     9.965 r  rc_rx_inst/prev_error_reg[3]_i_64/CO[3]
+                         net (fo=1, unplaced)         0.000     9.965    rc_rx_inst/prev_error_reg[3]_i_64_n_0
+                         CARRY4 (Prop_carry4_CI_CO[0])
+                                                      0.281    10.246 r  rc_rx_inst/prev_error_reg[11]_i_61/CO[0]
+                         net (fo=7, unplaced)         0.369    10.615    rc_rx_inst/prev_error_reg[11]_i_61_n_3
+                         CARRY4 (Prop_carry4_CYINIT_CO[2])
+                                                      0.875    11.490 f  rc_rx_inst/prev_error_reg[15]_i_165/CO[2]
+                         net (fo=33, unplaced)        0.524    12.014    rc_rx_inst/prev_error_reg[15]_i_165_n_1
+                         LUT6 (Prop_lut6_I0_O)        0.310    12.324 r  rc_rx_inst/prev_error[15]_i_147/O
+                         net (fo=2, unplaced)         0.650    12.974    rc_rx_inst/prev_error[15]_i_147_n_0
+                         CARRY4 (Prop_carry4_DI[1]_O[3])
+                                                      0.629    13.603 r  rc_rx_inst/prev_error_reg[15]_i_76/O[3]
+                         net (fo=3, unplaced)         0.636    14.239    rc_rx_inst/prev_error_reg[15]_i_76_n_4
+                         LUT4 (Prop_lut4_I3_O)        0.307    14.546 f  rc_rx_inst/prev_error[15]_i_79__0/O
+                         net (fo=2, unplaced)         0.460    15.006    rc_rx_inst/prev_error[15]_i_79__0_n_0
+                         LUT5 (Prop_lut5_I4_O)        0.124    15.130 r  rc_rx_inst/prev_error[15]_i_37/O
+                         net (fo=2, unplaced)         0.650    15.780    rc_rx_inst/prev_error[15]_i_37_n_0
+                         CARRY4 (Prop_carry4_DI[1]_O[2])
+                                                      0.566    16.346 r  rc_rx_inst/prev_error_reg[15]_i_15/O[2]
+                         net (fo=12, unplaced)        0.500    16.846    rc_rx_inst/prev_error_reg[15]_i_15_n_5
+                         LUT3 (Prop_lut3_I2_O)        0.301    17.147 r  rc_rx_inst/prev_error[15]_i_283/O
+                         net (fo=1, unplaced)         0.639    17.786    rc_rx_inst/prev_error[15]_i_283_n_0
+                         CARRY4 (Prop_carry4_DI[1]_CO[3])
+                                                      0.520    18.306 r  rc_rx_inst/prev_error_reg[15]_i_245/CO[3]
+                         net (fo=1, unplaced)         0.000    18.306    rc_rx_inst/prev_error_reg[15]_i_245_n_0
+                         CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.331    18.637 r  rc_rx_inst/prev_error_reg[15]_i_215/O[3]
+                         net (fo=3, unplaced)         0.636    19.273    rc_rx_inst/prev_error_reg[15]_i_215_n_4
+                         LUT4 (Prop_lut4_I0_O)        0.307    19.580 r  rc_rx_inst/prev_error[15]_i_205/O
+                         net (fo=1, unplaced)         0.639    20.219    rc_rx_inst/prev_error[15]_i_205_n_0
+                         CARRY4 (Prop_carry4_DI[1]_CO[3])
+                                                      0.520    20.739 r  rc_rx_inst/prev_error_reg[15]_i_169/CO[3]
+                         net (fo=1, unplaced)         0.000    20.739    rc_rx_inst/prev_error_reg[15]_i_169_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    20.856 r  rc_rx_inst/prev_error_reg[15]_i_118/CO[3]
+                         net (fo=1, unplaced)         0.000    20.856    rc_rx_inst/prev_error_reg[15]_i_118_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    20.973 r  rc_rx_inst/prev_error_reg[15]_i_63/CO[3]
+                         net (fo=1, unplaced)         0.000    20.973    rc_rx_inst/prev_error_reg[15]_i_63_n_0
+                         CARRY4 (Prop_carry4_CI_CO[1])
+                                                      0.179    21.152 r  rc_rx_inst/prev_error_reg[15]_i_28/CO[1]
+                         net (fo=18, unplaced)        0.369    21.521    rc_rx_inst/prev_error_reg[15]_i_28_n_2
+                         LUT6 (Prop_lut6_I4_O)        0.332    21.853 r  rc_rx_inst/prev_error[7]_i_25/O
+                         net (fo=1, unplaced)         0.665    22.518    rc_rx_inst/rc_mapper_inst/p_0_in[1]
+                         CARRY4 (Prop_carry4_S[0]_CO[3])
+                                                      0.637    23.155 r  rc_rx_inst/prev_error_reg[7]_i_12/CO[3]
+                         net (fo=1, unplaced)         0.009    23.164    rc_rx_inst/prev_error_reg[7]_i_12_n_0
+                         CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.331    23.495 r  rc_rx_inst/prev_error_reg[11]_i_12/O[3]
+                         net (fo=1, unplaced)         0.618    24.113    rc_rx_inst/prev_error_reg[11]_i_12_n_4
+                         LUT6 (Prop_lut6_I4_O)        0.307    24.420 r  rc_rx_inst/prev_error[11]_i_5/O
+                         net (fo=4, unplaced)         0.473    24.893    attitude_inst/target_roll_angle[7]
+                         LUT3 (Prop_lut3_I2_O)        0.116    25.009 r  attitude_inst/d_term_i_14/O
+                         net (fo=2, unplaced)         0.395    25.404    attitude_inst/d_term_i_14_n_0
+                         CARRY4 (Prop_carry4_DI[1]_CO[3])
+                                                      0.724    26.128 r  attitude_inst/d_term_i_2/CO[3]
+                         net (fo=1, unplaced)         0.000    26.128    attitude_inst/d_term_i_2_n_0
+                         CARRY4 (Prop_carry4_CI_O[1])
+                                                      0.337    26.465 r  attitude_inst/d_term_i_1/O[1]
+                         net (fo=1, unplaced)         0.800    27.264    pid_angle_roll/A[13]
+                         DSP48E1 (Prop_dsp48e1_A[13]_PCOUT[47])
+                                                      4.215    31.479 r  pid_angle_roll/d_term/PCOUT[47]
+                         net (fo=1, unplaced)         0.055    31.534    pid_angle_roll/d_term_n_106
+                         DSP48E1 (Prop_dsp48e1_PCIN[47]_P[1])
+                                                      1.518    33.052 r  pid_angle_roll/total_correction_raw/P[1]
+                         net (fo=1, unplaced)         0.800    33.852    pid_angle_roll/total_correction_raw_n_104
+                         LUT2 (Prop_lut2_I1_O)        0.124    33.976 r  pid_angle_roll/prev_error[3]_i_23__1/O
+                         net (fo=1, unplaced)         0.000    33.976    pid_angle_roll/prev_error[3]_i_23__1_n_0
+                         CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.533    34.509 r  pid_angle_roll/prev_error_reg[3]_i_16/CO[3]
+                         net (fo=1, unplaced)         0.009    34.518    pid_angle_roll/prev_error_reg[3]_i_16_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    34.635 r  pid_angle_roll/prev_error_reg[3]_i_11__2/CO[3]
+                         net (fo=1, unplaced)         0.000    34.635    pid_angle_roll/prev_error_reg[3]_i_11__2_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    34.752 r  pid_angle_roll/prev_error_reg[3]_i_10__2/CO[3]
+                         net (fo=1, unplaced)         0.000    34.752    pid_angle_roll/prev_error_reg[3]_i_10__2_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    34.869 r  pid_angle_roll/prev_error_reg[7]_i_10__2/CO[3]
+                         net (fo=1, unplaced)         0.000    34.869    pid_angle_roll/prev_error_reg[7]_i_10__2_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    34.986 r  pid_angle_roll/prev_error_reg[11]_i_10__2/CO[3]
+                         net (fo=1, unplaced)         0.000    34.986    pid_angle_roll/prev_error_reg[11]_i_10__2_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    35.103 r  pid_angle_roll/prev_error_reg[15]_i_11__2/CO[3]
+                         net (fo=1, unplaced)         0.000    35.103    pid_angle_roll/prev_error_reg[15]_i_11__2_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    35.220 r  pid_angle_roll/prev_error_reg[15]_i_32/CO[3]
+                         net (fo=1, unplaced)         0.000    35.220    pid_angle_roll/prev_error_reg[15]_i_32_n_0
+                         CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.331    35.551 r  pid_angle_roll/prev_error_reg[15]_i_15__2/O[3]
+                         net (fo=18, unplaced)        0.863    36.414    pid_angle_roll/p_0_in0
+                         CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.840    37.254 r  pid_angle_roll/prev_error_reg[15]_i_14/CO[3]
+                         net (fo=1, unplaced)         0.000    37.254    pid_angle_roll/prev_error_reg[15]_i_14_n_0
+                         CARRY4 (Prop_carry4_CI_CO[0])
+                                                      0.281    37.535 f  pid_angle_roll/prev_error_reg[15]_i_10__1/CO[0]
+                         net (fo=62, unplaced)        0.558    38.093    pid_angle_roll/pid_correction1
+                         LUT5 (Prop_lut5_I3_O)        0.393    38.486 r  pid_angle_roll/d_term_i_30__2/O
+                         net (fo=2, unplaced)         0.395    38.881    pid_angle_roll/d_term_i_30__2_n_0
+                         CARRY4 (Prop_carry4_DI[1]_CO[3])
+                                                      0.724    39.605 r  pid_angle_roll/d_term_i_4__1/CO[3]
+                         net (fo=1, unplaced)         0.009    39.614    pid_angle_roll/d_term_i_4__1_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    39.731 r  pid_angle_roll/d_term_i_3__1/CO[3]
+                         net (fo=1, unplaced)         0.000    39.731    pid_angle_roll/d_term_i_3__1_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    39.848 r  pid_angle_roll/d_term_i_2__1/CO[3]
+                         net (fo=1, unplaced)         0.000    39.848    pid_angle_roll/d_term_i_2__1_n_0
+                         CARRY4 (Prop_carry4_CI_O[1])
+                                                      0.337    40.185 r  pid_angle_roll/d_term_i_1__1/O[1]
+                         net (fo=1, unplaced)         0.800    40.985    pid_rate_roll/d_term_0[13]
+                         DSP48E1 (Prop_dsp48e1_A[13]_PCOUT[47])
+                                                      4.215    45.200 r  pid_rate_roll/d_term/PCOUT[47]
+                         net (fo=1, unplaced)         0.055    45.255    pid_rate_roll/d_term_n_106
+                         DSP48E1 (Prop_dsp48e1_PCIN[47]_P[1])
+                                                      1.518    46.773 r  pid_rate_roll/total_correction_raw/P[1]
+                         net (fo=1, unplaced)         0.800    47.573    pid_rate_roll/total_correction_raw_n_104
+                         LUT2 (Prop_lut2_I1_O)        0.124    47.697 r  pid_rate_roll/duty_cycle_buf[3]_i_55/O
+                         net (fo=1, unplaced)         0.000    47.697    pid_rate_roll/duty_cycle_buf[3]_i_55_n_0
+                         CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.533    48.230 r  pid_rate_roll/duty_cycle_buf_reg[3]_i_31/CO[3]
+                         net (fo=1, unplaced)         0.009    48.239    pid_rate_roll/duty_cycle_buf_reg[3]_i_31_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    48.356 r  pid_rate_roll/duty_cycle_buf_reg[3]_i_22/CO[3]
+                         net (fo=1, unplaced)         0.000    48.356    pid_rate_roll/duty_cycle_buf_reg[3]_i_22_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    48.473 r  pid_rate_roll/duty_cycle_buf_reg[3]_i_14/CO[3]
+                         net (fo=1, unplaced)         0.000    48.473    pid_rate_roll/duty_cycle_buf_reg[3]_i_14_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    48.590 r  pid_rate_roll/duty_cycle_buf_reg[11]_i_30/CO[3]
+                         net (fo=1, unplaced)         0.000    48.590    pid_rate_roll/duty_cycle_buf_reg[11]_i_30_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    48.707 r  pid_rate_roll/duty_cycle_buf_reg[14]_i_70/CO[3]
+                         net (fo=1, unplaced)         0.000    48.707    pid_rate_roll/duty_cycle_buf_reg[14]_i_70_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    48.824 r  pid_rate_roll/duty_cycle_buf_reg[14]_i_62/CO[3]
+                         net (fo=1, unplaced)         0.000    48.824    pid_rate_roll/duty_cycle_buf_reg[14]_i_62_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    48.941 r  pid_rate_roll/duty_cycle_buf_reg[3]_i_42/CO[3]
+                         net (fo=1, unplaced)         0.000    48.941    pid_rate_roll/duty_cycle_buf_reg[3]_i_42_n_0
+                         CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.331    49.272 r  pid_rate_roll/duty_cycle_buf_reg[3]_i_28/O[3]
+                         net (fo=18, unplaced)        0.863    50.135    pid_rate_roll/p_0_in0
+                         CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.840    50.975 r  pid_rate_roll/duty_cycle_buf_reg[3]_i_27/CO[3]
+                         net (fo=1, unplaced)         0.000    50.975    pid_rate_roll/duty_cycle_buf_reg[3]_i_27_n_0
+                         CARRY4 (Prop_carry4_CI_CO[0])
+                                                      0.281    51.256 r  pid_rate_roll/duty_cycle_buf_reg[3]_i_15/CO[0]
+                         net (fo=65, unplaced)        0.559    51.815    pid_rate_roll/i_term__0_0[0]
+                         LUT4 (Prop_lut4_I2_O)        0.367    52.182 r  pid_rate_roll/duty_cycle_buf[7]_i_19__0/O
+                         net (fo=1, unplaced)         0.000    52.182    rc_rx_inst/duty_cycle_buf[3]_i_9__1[1]
+                         CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.533    52.715 r  rc_rx_inst/duty_cycle_buf_reg[7]_i_14/CO[3]
+                         net (fo=1, unplaced)         0.009    52.724    rc_rx_inst/duty_cycle_buf_reg[7]_i_14_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    52.841 r  rc_rx_inst/duty_cycle_buf_reg[11]_i_11/CO[3]
+                         net (fo=1, unplaced)         0.000    52.841    rc_rx_inst/duty_cycle_buf_reg[11]_i_11_n_0
+                         CARRY4 (Prop_carry4_CI_O[3])
+                                                      0.331    53.172 r  rc_rx_inst/duty_cycle_buf_reg[14]_i_35/O[3]
+                         net (fo=4, unplaced)         0.642    53.814    pid_rate_yaw/p_2_in[10]
+                         LUT5 (Prop_lut5_I0_O)        0.307    54.121 r  pid_rate_yaw/duty_cycle_buf[14]_i_19__2/O
+                         net (fo=2, unplaced)         0.430    54.551    pid_rate_yaw/duty_cycle_buf[14]_i_19__2_n_0
+                         LUT6 (Prop_lut6_I0_O)        0.124    54.675 r  pid_rate_yaw/duty_cycle_buf[14]_i_23__2/O
+                         net (fo=1, unplaced)         0.000    54.675    pid_rate_yaw/duty_cycle_buf[14]_i_23__2_n_0
+                         CARRY4 (Prop_carry4_S[0]_CO[3])
+                                                      0.513    55.188 r  pid_rate_yaw/duty_cycle_buf_reg[14]_i_6__1/CO[3]
+                         net (fo=1, unplaced)         0.000    55.188    pid_rate_yaw/duty_cycle_buf_reg[14]_i_6__1_n_0
+                         CARRY4 (Prop_carry4_CI_CO[1])
+                                                      0.179    55.367 r  pid_rate_yaw/duty_cycle_buf_reg[14]_i_13__0/CO[1]
+                         net (fo=24, unplaced)        0.779    56.146    pid_rate_yaw/duty_cycle_buf_reg[14]_i_13__0_n_2
+                         CARRY4 (Prop_carry4_S[1]_CO[3])
+                                                      0.865    57.011 r  pid_rate_yaw/duty_cycle_buf_reg[14]_i_9__0/CO[3]
+                         net (fo=1, unplaced)         0.000    57.011    pid_rate_yaw/duty_cycle_buf_reg[14]_i_9__0_n_0
+                         CARRY4 (Prop_carry4_CI_CO[3])
+                                                      0.117    57.128 r  pid_rate_yaw/duty_cycle_buf_reg[14]_i_4__0/CO[3]
+                         net (fo=15, unplaced)        0.774    57.902    pid_rate_yaw/duty_cycle_buf_reg[14]_i_4__0_n_0
+                         LUT4 (Prop_lut4_I3_O)        0.150    58.052 r  pid_rate_yaw/duty_cycle_buf[11]_i_1__1/O
+                         net (fo=1, unplaced)         0.000    58.052    gen_esc_pwm[2].esc_pwm_inst/duty_cycle[11]
+                         FDCE                                         r  gen_esc_pwm[2].esc_pwm_inst/duty_cycle_buf_reg[11]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock sys_clk_pin rise edge)
+                                                     83.333    83.333 r  
+    L17                                               0.000    83.333 r  clk (IN)
+                         net (fo=0)                   0.000    83.333    clk
+    L17                  IBUF (Prop_ibuf_I_O)         1.406    84.739 r  clk_IBUF_inst/O
+                         net (fo=1, unplaced)         0.760    85.498    clk_IBUF
+                         BUFG (Prop_bufg_I_O)         0.091    85.589 r  clk_IBUF_BUFG_inst/O
+                         net (fo=985, unplaced)       0.439    86.028    gen_esc_pwm[2].esc_pwm_inst/clk_IBUF_BUFG
+                         FDCE                                         r  gen_esc_pwm[2].esc_pwm_inst/duty_cycle_buf_reg[11]/C
+                         clock pessimism              0.116    86.144    
+                         clock uncertainty           -0.035    86.108    
+                         FDCE (Setup_fdce_C_D)        0.029    86.137    gen_esc_pwm[2].esc_pwm_inst/duty_cycle_buf_reg[11]
+  -------------------------------------------------------------------
+                         required time                         86.137    
+                         arrival time                         -58.052    
+  -------------------------------------------------------------------
+                         slack                                 28.086    
+
+
+
+
+
+Min Delay Paths
+--------------------------------------------------------------------------------------
+Slack (MET) :             0.142ns  (arrival time - required time)
+  Source:                 spi_master_inst/byte_idx_reg[4]/C
+                            (rising edge-triggered cell FDCE clocked by sys_clk_pin  {rise@0.000ns fall@41.667ns period=83.333ns})
+  Destination:            spi_master_inst/byte_idx_reg[4]/D
+                            (rising edge-triggered cell FDCE clocked by sys_clk_pin  {rise@0.000ns fall@41.667ns period=83.333ns})
+  Path Group:             sys_clk_pin
+  Path Type:              Hold (Min at Fast Process Corner)
+  Requirement:            0.000ns  (sys_clk_pin rise@0.000ns - sys_clk_pin rise@0.000ns)
+  Data Path Delay:        0.378ns  (logic 0.239ns (63.281%)  route 0.139ns (36.719%))
+  Logic Levels:           1  (LUT6=1)
+  Clock Path Skew:        0.145ns (DCD - SCD - CPR)
+    Destination Clock Delay (DCD):    1.075ns
+    Source Clock Delay      (SCD):    0.721ns
+    Clock Pessimism Removal (CPR):    0.209ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock sys_clk_pin rise edge)
+                                                      0.000     0.000 r  
+    L17                                               0.000     0.000 r  clk (IN)
+                         net (fo=0)                   0.000     0.000    clk
+    L17                  IBUF (Prop_ibuf_I_O)         0.244     0.244 r  clk_IBUF_inst/O
+                         net (fo=1, unplaced)         0.337     0.581    clk_IBUF
+                         BUFG (Prop_bufg_I_O)         0.026     0.607 r  clk_IBUF_BUFG_inst/O
+                         net (fo=985, unplaced)       0.114     0.721    spi_master_inst/clk_IBUF_BUFG
+                         FDCE                                         r  spi_master_inst/byte_idx_reg[4]/C
+  -------------------------------------------------------------------    -------------------
+                         FDCE (Prop_fdce_C_Q)         0.141     0.862 r  spi_master_inst/byte_idx_reg[4]/Q
+                         net (fo=3, unplaced)         0.139     1.001    spi_master_inst/byte_idx_reg[4]
+                         LUT6 (Prop_lut6_I5_O)        0.098     1.099 r  spi_master_inst/byte_idx[4]_i_2/O
+                         net (fo=1, unplaced)         0.000     1.099    spi_master_inst/p_0_in__1[4]
+                         FDCE                                         r  spi_master_inst/byte_idx_reg[4]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock sys_clk_pin rise edge)
+                                                      0.000     0.000 r  
+    L17                                               0.000     0.000 r  clk (IN)
+                         net (fo=0)                   0.000     0.000    clk
+    L17                  IBUF (Prop_ibuf_I_O)         0.432     0.432 r  clk_IBUF_inst/O
+                         net (fo=1, unplaced)         0.355     0.787    clk_IBUF
+                         BUFG (Prop_bufg_I_O)         0.029     0.816 r  clk_IBUF_BUFG_inst/O
+                         net (fo=985, unplaced)       0.259     1.075    spi_master_inst/clk_IBUF_BUFG
+                         FDCE                                         r  spi_master_inst/byte_idx_reg[4]/C
+                         clock pessimism             -0.209     0.866    
+                         FDCE (Hold_fdce_C_D)         0.091     0.957    spi_master_inst/byte_idx_reg[4]
+  -------------------------------------------------------------------
+                         required time                         -0.957    
+                         arrival time                           1.099    
+  -------------------------------------------------------------------
+                         slack                                  0.142    
+
+
+
+
+
+Pulse Width Checks
+--------------------------------------------------------------------------------------
+Clock Name:         sys_clk_pin
+Waveform(ns):       { 0.000 41.667 }
+Period(ns):         83.333
+Sources:            { clk }
+
+Check Type        Corner  Lib Pin  Reference Pin  Required(ns)  Actual(ns)  Slack(ns)  Location  Pin
+Min Period        n/a     BUFG/I   n/a            2.155         83.333      81.178               clk_IBUF_BUFG_inst/I
+Low Pulse Width   Slow    FDCE/C   n/a            0.500         41.666      41.166               attitude_inst/pitch_q16_reg_reg[0]/C
+High Pulse Width  Slow    FDCE/C   n/a            0.500         41.667      41.167               attitude_inst/pitch_q16_reg_reg[0]/C
+
+
+

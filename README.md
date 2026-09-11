@@ -102,6 +102,21 @@ The design is targeted for physical deployment on standard quadcopter avionics h
   - 32-bit Q16.16 complementary filter for real-time attitude estimation (gyro integration + accelerometer gravity compensation).
   - 16-bit Q8.8 cascaded PID pipelines with anti-windup clamping and dynamic integral reset.
 
+### Hardware Synthesis & FPGA Resource Utilization
+
+Synthesized with **AMD Vivado v2025.2.1** targeting the **Artix-7 XC7A35T-1CPG236C** device:
+
+| Resource Type | Used | Available | Utilization (%) | Engineering Notes |
+| :--- | :---: | :---: | :---: | :--- |
+| **Slice LUTs** | 3,224 | 20,800 | **15.50%** | Pure combinational logic, mixers, and routing |
+| **Slice Registers (FFs)** | 985 | 41,600 | **2.37%** | Pipelined registers, state machines, and synchronizers |
+| **Latches** | **0** | 41,600 | **0.00%** | **Zero unintended latches** (strict synthesizable RTL hygiene) |
+| **DSP48E1 Slices** | 23 | 90 | **25.56%** | Dedicated hardware multipliers for Q8.8 PID & Q16.16 filter |
+| **Bonded IOBs** | 14 | 106 | **13.21%** | Clocks, reset, 4-wire SPI, RC inputs, PWM outputs |
+| **Worst Negative Slack (WNS)** | **+28.086 ns** | - | **MET** | 12.0 MHz master clock (83.33 ns period) |
+| **Total Negative Slack (TNS)** | **0.000 ns** | - | **MET** | 100% timing closure across all 1,778 endpoints |
+
+
 ---
 
 ## RTL Module Summary

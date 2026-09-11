@@ -43,16 +43,20 @@ TESTBENCHES = \
 	spi_master_tb \
 	flight_core_tb
 
-.PHONY: all sim test clean help $(TESTBENCHES)
+.PHONY: all sim test clean help synth $(TESTBENCHES)
 
 all: test
 sim: test
+
+synth:
+	vivado -mode batch -source scripts/synth.tcl -nojournal -nolog
 
 help:
 	@echo FPGA Flight Controller Verification Suite
 	@echo Usage:
 	@echo   make test              Run all testbenches (default: SIM=vivado)
 	@echo   make sim               Alias for make test
+	@echo   make synth             Run Vivado batch synthesis for Artix-7
 	@echo   make clean             Remove simulation artifacts and logs
 	@echo   make <tb_name>         Run specific testbench (e.g., make flight_core_tb)
 	@echo.
